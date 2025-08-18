@@ -44,7 +44,6 @@ public:
     QMenuBar *MenuBar;
     QMenu *MenuFile;
     QMenu *MenuEdit;
-    QMenu *MenuNew;
     QDockWidget *ObjectHierarchy;
     QWidget *ObjectHierarchyContents;
     QDockWidget *PropertyEditor;
@@ -99,8 +98,6 @@ public:
         MenuFile->setObjectName("MenuFile");
         MenuEdit = new QMenu(MenuBar);
         MenuEdit->setObjectName("MenuEdit");
-        MenuNew = new QMenu(MenuBar);
-        MenuNew->setObjectName("MenuNew");
         UIMaker2->setMenuBar(MenuBar);
         ObjectHierarchy = new QDockWidget(UIMaker2);
         ObjectHierarchy->setObjectName("ObjectHierarchy");
@@ -124,19 +121,12 @@ public:
 
         MenuBar->addAction(MenuFile->menuAction());
         MenuBar->addAction(MenuEdit->menuAction());
-        MenuBar->addAction(MenuNew->menuAction());
         MenuFile->addAction(ActionNew);
         MenuFile->addAction(ActionLoad);
         MenuFile->addAction(ActionExport);
-        MenuEdit->addAction(ActionMove);
-        MenuEdit->addAction(ActionScale);
-        MenuEdit->addAction(ActionRotate);
-        MenuEdit->addSeparator();
-        MenuEdit->addAction(ActionUndo);
-        MenuEdit->addAction(ActionRedo);
-        MenuNew->addAction(ActionAddImage);
-        MenuNew->addAction(ActionAddButton);
-        MenuNew->addAction(ActionAddText);
+        MenuEdit->addAction(ActionAddImage);
+        MenuEdit->addAction(ActionAddButton);
+        MenuEdit->addAction(ActionAddText);
 
         retranslateUi(UIMaker2);
 
@@ -160,7 +150,6 @@ public:
         ActionExport->setText(QCoreApplication::translate("UIMaker2", "Export", nullptr));
         MenuFile->setTitle(QCoreApplication::translate("UIMaker2", "File", nullptr));
         MenuEdit->setTitle(QCoreApplication::translate("UIMaker2", "Edit", nullptr));
-        MenuNew->setTitle(QCoreApplication::translate("UIMaker2", "New", nullptr));
         ObjectHierarchy->setWindowTitle(QCoreApplication::translate("UIMaker2", "Object Hierarchy", nullptr));
         PropertyEditor->setWindowTitle(QCoreApplication::translate("UIMaker2", "Property Editor", nullptr));
     } // retranslateUi

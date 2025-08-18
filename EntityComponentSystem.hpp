@@ -441,7 +441,7 @@ public:
         return e;
     }
 
-    void ReparentTo(UiElement* newParent, int = -1)
+    void ReparentTo(UiElement* newParent, int insertPos = -1)
     {
         if (newParent == nullptr || newParent == this)
             return;
@@ -452,10 +452,47 @@ public:
                 return;
         }
 
-        if (qobject_cast<UiElement*>(parent()) == newParent)
+        UiElement* oldParent = qobject_cast<UiElement*>(parent());
+
+        if (oldParent == newParent)
+        {
+            QObjectList& siblings = const_cast<QObjectList&>(newParent->children());
+            int currentIndex = siblings.indexOf(this);
+
+            if (insertPos < 0)
+                insertPos = siblings.size() - 1;
+
+            if (insertPos > currentIndex)
+                --insertPos;
+
+            if (insertPos < 0)
+                insertPos = 0;
+
+            if (insertPos >= siblings.size())
+                insertPos = siblings.size() - 1;
+
+            if (currentIndex != insertPos)
+            {
+                siblings.move(currentIndex, insertPos);
+                emit StructureChanged();
+            }
+
             return;
+        }
 
         setParent(newParent);
+
+        if (insertPos >= 0)
+        {
+            QObjectList& siblings = const_cast<QObjectList&>(newParent->children());
+            int currentIndex = siblings.indexOf(this);
+
+            if (insertPos >= siblings.size())
+                insertPos = siblings.size() - 1;
+
+            if (currentIndex != insertPos)
+                siblings.move(currentIndex, insertPos);
+        }
 
         emit StructureChanged();
     }

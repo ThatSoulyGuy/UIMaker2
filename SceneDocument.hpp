@@ -34,6 +34,7 @@ public:
     }
 
     QByteArray ExportJson() const;
+    bool LoadJson(const QByteArray& data);
 
 signals:
 
@@ -43,9 +44,15 @@ public slots:
 
     void SetSelected(UiElement* e);
 
+private slots:
+
+    void OnStructureChanged();
+
 private:
 
     SceneElementItem* CreateItemFor(UiElement* e);
+    UiElement* CreateElementFromJson(const QJsonObject& obj, UiElement* parent);
+    void UpdateZValues(UiElement* parent);
 
     UiElement* root;
     QGraphicsScene* scene;

@@ -18,7 +18,25 @@ SceneElementItem* SceneDocument::CreateItemFor(UiElement* e)
     scene->addItem(item);
     items.insert(e, item);
 
+    QObject::connect(e, &UiElement::StructureChanged, this, &SceneDocument::OnStructureChanged);
+
     return item;
+}
+
+void SceneDocument::UpdateZValues(UiElement* parent)
+{
+    int z = 0;
+
+    for (QObject* c : parent->children())
+    {
+        if (auto* e = qobject_cast<UiElement*>(c))
+        {
+            if (auto* item = items.value(e, nullptr))
+                item->setZValue(z++);
+
+            UpdateZValues(e);
+        }
+    }
 }
 
 UiElement* SceneDocument::CreateImageElement(const QString& name, UiElement* parent)
@@ -68,6 +86,28 @@ UiElement* SceneDocument::CreateButtonElement(const QString& name, UiElement* pa
     return e;
 }
 
+void SceneDocument::OnStructureChanged()
+{
+    for (auto it = items.begin(); it != items.end(); ++it)
+    {
+        UiElement* element = it.key();
+        SceneElementItem* item = it.value();
+
+        UiElement* parentElement = qobject_cast<UiElement*>(element->parent());
+        SceneElementItem* parentItem = parentElement ? items.value(parentElement, nullptr) : nullptr;
+
+        if (item->parentItem() != parentItem)
+        {
+            item->setParentItem(parentItem);
+
+            if (!parentItem && item->scene() != scene)
+                scene->addItem(item);
+        }
+    }
+
+    UpdateZValues(root);
+}
+
 QByteArray SceneDocument::ExportJson() const
 {
     QJsonObject rootObj;
@@ -78,10 +118,99 @@ QByteArray SceneDocument::ExportJson() const
     return doc.toJson(QJsonDocument::Indented);
 }
 
+bool SceneDocument::LoadJson(const QByteArray& data)
+{
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(data, &err);
+
+    if (err.error != QJsonParseError::NoError || !doc.isObject())
+        return false;
+
+    scene->clear();
+    items.clear();
+
+    delete root;
+    root = new UiElement("Root");
+
+    QJsonObject rootObj = doc.object();
+    root->SetName(rootObj["name"].toString("Root"));
+
+    QJsonArray rootComps = rootObj["components"].toArray();
+    for (const QJsonValue& v : rootComps)
+    {
+        QJsonObject c = v.toObject();
+        QString kind = c["kind"].toString();
+        Component* comp = nullptr;
+        if (kind == "Transform")
+            comp = root->AddComponent<TransformComponent>();
+        else if (kind == "Image")
+            comp = root->AddComponent<ImageComponent>();
+        else if (kind == "Text")
+            comp = root->AddComponent<TextComponent>();
+        else if (kind == "Button")
+            comp = root->AddComponent<ButtonComponent>();
+
+        if (comp)
+            comp->FromJson(c);
+    }
+
+    QJsonArray children = rootObj["children"].toArray();
+    for (const QJsonValue& v : children)
+    {
+        QJsonObject childObj = v.toObject();
+        CreateElementFromJson(childObj, root);
+    }
+
+    QObject::connect(root, &UiElement::StructureChanged, this, &SceneDocument::OnStructureChanged);
+    OnStructureChanged();
+
+    return true;
+}
+
 void SceneDocument::SetSelected(UiElement* e)
 {
     for (auto it = items.begin(); it != items.end(); ++it)
         it.value()->setSelected(it.key() == e);
 
     emit SelectionChanged(e);
+}
+
+UiElement* SceneDocument::CreateElementFromJson(const QJsonObject& obj, UiElement* parent)
+{
+    QString name = obj["name"].toString("Element");
+    UiElement* e = parent->AddChild(name);
+
+    QJsonArray comps = obj["components"].toArray();
+
+    for (const QJsonValue& v : comps)
+    {
+        QJsonObject c = v.toObject();
+        QString kind = c["kind"].toString();
+
+        Component* comp = nullptr;
+
+        if (kind == "Transform")
+            comp = e->AddComponent<TransformComponent>();
+        else if (kind == "Image")
+            comp = e->AddComponent<ImageComponent>();
+        else if (kind == "Text")
+            comp = e->AddComponent<TextComponent>();
+        else if (kind == "Button")
+            comp = e->AddComponent<ButtonComponent>();
+
+        if (comp)
+            comp->FromJson(c);
+    }
+
+    CreateItemFor(e);
+
+    QJsonArray children = obj["children"].toArray();
+
+    for (const QJsonValue& v : children)
+    {
+        QJsonObject childObj = v.toObject();
+        CreateElementFromJson(childObj, e);
+    }
+
+    return e;
 }

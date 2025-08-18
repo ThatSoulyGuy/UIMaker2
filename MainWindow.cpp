@@ -126,15 +126,6 @@ void MainWindow::ConnectActions()
         propertyPanel->SetTarget(document->GetRoot());
     });
 
-    connect(ui->ActionLoad, &QAction::triggered, this, [this]()
-    {
-        auto json = document->ExportJson();
-
-        QGuiApplication::clipboard()->setText(QString::fromUtf8(json));
-
-        QMessageBox::information(this, "Export", "Scene JSON copied to clipboard.");
-    });
-
     connect(ui->ActionExport, &QAction::triggered, this, [this]()
     {
         QString path = QFileDialog::getSaveFileName(this, "Export Scene JSON", QString(), "JSON (*.json)");
@@ -166,9 +157,47 @@ void MainWindow::ConnectActions()
 
     connect(ui->ActionLoad, &QAction::triggered, this, [this]()
     {
-        QByteArray json = document->ExportJson();
-        QGuiApplication::clipboard()->setText(QString::fromUtf8(json));
-        QMessageBox::information(this, "Export", "Scene JSON copied to clipboard.");
+        QString path = QFileDialog::getOpenFileName(this, "Load Scene JSON", QString(), "JSON (*.json)");
+
+        if (path.isEmpty())
+            return;
+
+        QFile file(path);
+
+        if (!file.open(QIODevice::ReadOnly))
+        {
+            QMessageBox::warning(this, "Load Failed", QString("Could not open file:\n%1").arg(file.errorString()));
+            return;
+        }
+
+        QByteArray json = file.readAll();
+        file.close();
+
+        SceneDocument* newDoc = new SceneDocument(this);
+
+        if (!newDoc->LoadJson(json))
+        {
+            delete newDoc;
+            QMessageBox::warning(this, "Load Failed", "Invalid or corrupt scene JSON.");
+            return;
+        }
+
+        delete document;
+        document = newDoc;
+
+        ui->graphicsView->setScene(document->GetScene());
+        AttachScene(document->GetScene());
+
+        delete hierarchyModel;
+        hierarchyModel = new EntityTreeModel(document->GetRoot(), this);
+
+        delete hierarchySelection;
+        hierarchySelection = new QItemSelectionModel(hierarchyModel, this);
+
+        hierarchyView->setModel(hierarchyModel);
+        hierarchyView->setSelectionModel(hierarchySelection);
+
+        propertyPanel->SetTarget(document->GetRoot());
     });
 }
 
