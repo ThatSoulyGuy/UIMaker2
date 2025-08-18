@@ -11,6 +11,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMetaProperty>
+#include <QMetaType>
+#include <QFontDatabase>
 #include <vector>
 
 enum class ComponentKind
@@ -39,14 +41,33 @@ signals:
 
 class TransformComponent : public Component
 {
+
     Q_OBJECT
-    Q_PROPERTY(QPointF position READ GetPosition WRITE SetPosition NOTIFY ComponentChanged)
-    Q_PROPERTY(double rotationDegrees READ GetRotationDegrees WRITE SetRotationDegrees NOTIFY ComponentChanged)
-    Q_PROPERTY(QPointF scale READ GetScale WRITE SetScale NOTIFY ComponentChanged)
 
 public:
 
-    explicit TransformComponent(QObject* parent = nullptr) : Component(parent), position(0.0, 0.0), rotationDegrees(0.0), scale(1.0, 1.0) { }
+    enum class Anchor
+    {
+        NONE = 0,
+        LEFT = 0x1,
+        RIGHT = 0x2,
+        TOP = 0x4,
+        BOTTOM = 0x8,
+        CENTER_X = 0x10,
+        CENTER_Y = 0x20
+    };
+
+    Q_ENUM(Anchor)
+    Q_DECLARE_FLAGS(AnchorFlags, Anchor)
+    Q_FLAG(AnchorFlags)
+
+    Q_PROPERTY(QPointF position READ GetPosition WRITE SetPosition NOTIFY ComponentChanged)
+    Q_PROPERTY(double rotationDegrees READ GetRotationDegrees WRITE SetRotationDegrees NOTIFY ComponentChanged)
+    Q_PROPERTY(QPointF scale READ GetScale WRITE SetScale NOTIFY ComponentChanged)
+    Q_PROPERTY(AnchorFlags anchors READ GetAnchors WRITE SetAnchors NOTIFY ComponentChanged)
+    Q_PROPERTY(AnchorFlags stretch READ GetStretch WRITE SetStretch NOTIFY ComponentChanged)
+
+    explicit TransformComponent(QObject* parent = nullptr) : Component(parent), position(0.0, 0.0), rotationDegrees(0.0), scale(1.0, 1.0), anchors((int)Anchor::LEFT | (int)Anchor::TOP), stretch(Anchor::NONE) { }
 
     ComponentKind GetKind() const noexcept override
     {
@@ -98,6 +119,49 @@ public:
         emit ComponentChanged();
     }
 
+    AnchorFlags GetAnchors() const noexcept
+    {
+        return anchors;
+    }
+
+    void SetAnchors(AnchorFlags value)
+    {
+        AnchorFlags sanitized = value;
+
+        if (sanitized.testFlag(Anchor::CENTER_X))
+            sanitized &= ~AnchorFlags((int)Anchor::LEFT | (int)Anchor::RIGHT);
+        else if (sanitized.testFlag(Anchor::LEFT) || sanitized.testFlag(Anchor::RIGHT))
+            sanitized &= ~AnchorFlags(Anchor::CENTER_X);
+
+        if (sanitized.testFlag(Anchor::CENTER_Y))
+            sanitized &= ~AnchorFlags((int)Anchor::TOP | (int)Anchor::BOTTOM);
+        else if (sanitized.testFlag(Anchor::TOP) || sanitized.testFlag(Anchor::BOTTOM))
+            sanitized &= ~AnchorFlags(Anchor::CENTER_Y);
+
+        if (anchors == sanitized)
+            return;
+
+        anchors = sanitized;
+
+        emit ComponentChanged();
+    }
+
+    AnchorFlags GetStretch() const noexcept
+    {
+        return stretch;
+    }
+
+    void SetStretch(AnchorFlags v)
+    {
+        if (stretch == v)
+            return;
+
+        stretch = v;
+
+        emit ComponentChanged();
+    }
+
+
     void ToJson(QJsonObject& out) const override
     {
         out["kind"] = "Transform";
@@ -113,6 +177,8 @@ public:
         SetPosition(QPointF(in["x"].toDouble(0.0), in["y"].toDouble(0.0)));
         SetRotationDegrees(in["rotationDegrees"].toDouble(0.0));
         SetScale(QPointF(in["scaleX"].toDouble(1.0), in["scaleY"].toDouble(1.0)));
+        SetAnchors(static_cast<AnchorFlags>(in["anchors"].toInt(static_cast<int>((int)Anchor::LEFT | (int)Anchor::TOP))));
+        SetStretch(static_cast<AnchorFlags>(in["stretch"].toInt(0)));
     }
 
 private:
@@ -120,14 +186,23 @@ private:
     QPointF position;
     double rotationDegrees;
     QPointF scale;
+    AnchorFlags anchors;
+    AnchorFlags stretch;
 
 };
+
+using Anchor = TransformComponent::Anchor;
+using AnchorFlags = TransformComponent::AnchorFlags;
+
+Q_DECLARE_METATYPE(AnchorFlags)
+Q_DECLARE_OPERATORS_FOR_FLAGS(AnchorFlags)
 
 class ImageComponent : public Component
 {
     Q_OBJECT
     Q_PROPERTY(QString imagePath READ GetImagePath WRITE SetImagePath NOTIFY ComponentChanged)
     Q_PROPERTY(QColor tint READ GetTint WRITE SetTint NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetPath READ GetAssetPath WRITE SetAssetPath NOTIFY ComponentChanged)
 
 public:
 
@@ -153,6 +228,21 @@ public:
         emit ComponentChanged();
     }
 
+    QString GetAssetPath() const noexcept
+    {
+        return assetPath;
+    }
+
+    void SetAssetPath(const QString& v)
+    {
+        if (assetPath == v)
+            return;
+
+        assetPath = v;
+
+        emit ComponentChanged();
+    }
+
     QColor GetTint() const noexcept
     {
         return tint;
@@ -173,18 +263,22 @@ public:
         out["kind"] = "Image";
         out["imagePath"] = imagePath;
         out["tint"] = tint.name(QColor::HexArgb);
+        out["assetPath"] = assetPath;
     }
 
     void FromJson(const QJsonObject& in) override
     {
         SetImagePath(in["imagePath"].toString());
         SetTint(QColor(in["tint"].toString("#FFFFFFFF")));
+        SetAssetPath(in["assetPath"].toString());
     }
+
 
 private:
 
     QString imagePath;
     QColor tint;
+    QString assetPath;
 
 };
 
@@ -195,6 +289,8 @@ class TextComponent : public Component
     Q_PROPERTY(QString fontFamily READ GetFontFamily WRITE SetFontFamily NOTIFY ComponentChanged)
     Q_PROPERTY(int pixelSize READ GetPixelSize WRITE SetPixelSize NOTIFY ComponentChanged)
     Q_PROPERTY(QColor color READ GetColor WRITE SetColor NOTIFY ComponentChanged)
+    Q_PROPERTY(QString fontPath READ GetFontPath WRITE SetFontPath NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetPath READ GetAssetPath WRITE SetAssetPath NOTIFY ComponentChanged)
 
 public:
 
@@ -205,6 +301,7 @@ public:
     {
         return text;
     }
+
     void SetText(const QString& v)
     {
         if (text == v)
@@ -260,6 +357,48 @@ public:
         emit ComponentChanged();
     }
 
+    QString GetFontPath() const noexcept
+    {
+        return fontPath;
+    }
+
+    void SetFontPath(const QString& v)
+    {
+        if (fontPath == v)
+            return;
+
+        fontPath = v;
+
+        if (!fontPath.isEmpty())
+        {
+            int id = QFontDatabase::addApplicationFont(fontPath);
+
+            if (id != -1)
+            {
+                const QStringList fams = QFontDatabase::applicationFontFamilies(id);
+                if (!fams.isEmpty())
+                    fontFamily = fams.first();
+            }
+        }
+
+        emit ComponentChanged();
+    }
+
+    QString GetAssetPath() const noexcept
+    {
+        return assetPath;
+    }
+
+    void SetAssetPath(const QString& v)
+    {
+        if (assetPath == v)
+            return;
+
+        assetPath = v;
+
+        emit ComponentChanged();
+    }
+    
     void ToJson(QJsonObject& out) const override
     {
         out["kind"] = "Text";
@@ -267,6 +406,8 @@ public:
         out["fontFamily"] = fontFamily;
         out["pixelSize"] = pixelSize;
         out["color"] = color.name(QColor::HexArgb);
+        out["fontPath"] = fontPath;
+        out["assetPath"] = assetPath;
     }
 
     void FromJson(const QJsonObject& in) override
@@ -275,6 +416,8 @@ public:
         SetFontFamily(in["fontFamily"].toString(fontFamily));
         SetPixelSize(in["pixelSize"].toInt(pixelSize));
         SetColor(QColor(in["color"].toString("#FFFFFFFF")));
+        SetFontPath(in["fontPath"].toString());
+        SetAssetPath(in["assetPath"].toString());
     }
 
 private:
@@ -283,6 +426,8 @@ private:
     QString fontFamily;
     int pixelSize;
     QColor color;
+    QString fontPath;
+    QString assetPath;
 
 };
 
@@ -292,10 +437,15 @@ class ButtonComponent : public Component
     Q_PROPERTY(QString text READ GetText WRITE SetText NOTIFY ComponentChanged)
     Q_PROPERTY(QColor backgroundColor READ GetBackgroundColor WRITE SetBackgroundColor NOTIFY ComponentChanged)
     Q_PROPERTY(QColor textColor READ GetTextColor WRITE SetTextColor NOTIFY ComponentChanged)
+    Q_PROPERTY(QString fontFamily READ GetFontFamily WRITE SetFontFamily NOTIFY ComponentChanged)
+    Q_PROPERTY(int pixelSize READ GetPixelSize WRITE SetPixelSize NOTIFY ComponentChanged)
+    Q_PROPERTY(QString fontPath READ GetFontPath WRITE SetFontPath NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetPath READ GetAssetPath WRITE SetAssetPath NOTIFY ComponentChanged)
 
 public:
 
-    explicit ButtonComponent(QObject* parent = nullptr) : Component(parent), backgroundColor(QColor(40, 40, 40)), textColor(Qt::white) { }
+    explicit ButtonComponent(QObject* parent = nullptr) : Component(parent), backgroundColor(QColor(40, 40, 40)), textColor(Qt::white), fontFamily("Inter"), pixelSize(24) { }
+
     ComponentKind GetKind() const noexcept override { return ComponentKind::BUTTON; }
 
     QString GetText() const noexcept
@@ -343,12 +493,88 @@ public:
         emit ComponentChanged();
     }
 
+    QString GetFontFamily() const noexcept
+    {
+        return fontFamily;
+    }
+
+    void SetFontFamily(const QString& v)
+    {
+        if (fontFamily == v)
+            return;
+
+        fontFamily = v;
+
+        emit ComponentChanged();
+    }
+
+    int GetPixelSize() const noexcept
+    {
+        return pixelSize;
+    }
+
+    void SetPixelSize(int v)
+    {
+        if (pixelSize == v)
+            return;
+
+        pixelSize = v;
+
+        emit ComponentChanged();
+    }
+
+    QString GetFontPath() const noexcept
+    {
+        return fontPath;
+    }
+
+    void SetFontPath(const QString& v)
+    {
+        if (fontPath == v)
+            return;
+
+        fontPath = v;
+
+        if (!fontPath.isEmpty())
+        {
+            int id = QFontDatabase::addApplicationFont(fontPath);
+
+            if (id != -1)
+            {
+                const QStringList fams = QFontDatabase::applicationFontFamilies(id);
+                if (!fams.isEmpty())
+                    fontFamily = fams.first();
+            }
+        }
+
+        emit ComponentChanged();
+    }
+
+    QString GetAssetPath() const noexcept
+    {
+        return assetPath;
+    }
+
+    void SetAssetPath(const QString& v)
+    {
+        if (assetPath == v)
+            return;
+
+        assetPath = v;
+
+        emit ComponentChanged();
+    }
+
     void ToJson(QJsonObject& out) const override
     {
         out["kind"] = "Button";
         out["text"] = text;
         out["backgroundColor"] = backgroundColor.name(QColor::HexArgb);
         out["textColor"] = textColor.name(QColor::HexArgb);
+        out["fontFamily"] = fontFamily;
+        out["pixelSize"] = pixelSize;
+        out["fontPath"] = fontPath;
+        out["assetPath"] = assetPath;
     }
 
     void FromJson(const QJsonObject& in) override
@@ -356,6 +582,10 @@ public:
         SetText(in["text"].toString("Button"));
         SetBackgroundColor(QColor(in["backgroundColor"].toString("#FF282828")));
         SetTextColor(QColor(in["textColor"].toString("#FFFFFFFF")));
+        SetFontFamily(in["fontFamily"].toString(fontFamily));
+        SetPixelSize(in["pixelSize"].toInt(pixelSize));
+        SetFontPath(in["fontPath"].toString());
+        SetAssetPath(in["assetPath"].toString());
     }
 
 private:
@@ -363,6 +593,10 @@ private:
     QString text;
     QColor backgroundColor;
     QColor textColor;
+    QString fontFamily;
+    int pixelSize;
+    QString fontPath;
+    QString assetPath;
 
 };
 

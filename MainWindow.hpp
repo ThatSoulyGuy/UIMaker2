@@ -24,12 +24,25 @@ public:
     MainWindow(QWidget* = nullptr);
     ~MainWindow();
 
+private slots:
+
+    bool eventFilter(QObject*, QEvent*);
+
 private:
 
     void BuildHierarchyDock();
     void BuildPropertyDock();
     void ConnectActions();
     void AttachScene(QGraphicsScene* scene);
+
+    void ZoomAt(const QPoint&, double);
+
+    void FitItem(QGraphicsItem*);
+
+    bool isPanning = false;
+    QPoint lastPanPoint;
+    double minZoom = 0.05;
+    double maxZoom = 20.0;
 
     Ui::UIMaker2* ui;
 

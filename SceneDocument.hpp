@@ -6,6 +6,8 @@
 #include "EntityComponentSystem.hpp"
 #include "SceneElementItem.hpp"
 
+class QGraphicsRectItem;
+
 class SceneDocument : public QObject
 {
     Q_OBJECT
@@ -56,6 +58,7 @@ private:
 
     UiElement* root;
     QGraphicsScene* scene;
+    QGraphicsRectItem* rootRect;
     QMap<UiElement*, SceneElementItem*> items;
 };
 

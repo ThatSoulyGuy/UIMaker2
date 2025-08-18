@@ -150,7 +150,18 @@ static constexpr auto qt_meta_stringdata_ZN18TransformComponentE = QtMocHelpers:
     "ComponentChanged",
     "position",
     "rotationDegrees",
-    "scale"
+    "scale",
+    "anchors",
+    "AnchorFlags",
+    "stretch",
+    "Anchor",
+    "NONE",
+    "LEFT",
+    "RIGHT",
+    "TOP",
+    "BOTTOM",
+    "CENTER_X",
+    "CENTER_Y"
 );
 #else  // !QT_MOC_HAS_STRINGDATA
 #error "qtmochelpers.h not found or too old."
@@ -163,8 +174,8 @@ Q_CONSTINIT static const uint qt_meta_data_ZN18TransformComponentE[] = {
        0,       // classname
        0,    0, // classinfo
        0,    0, // methods
-       3,   14, // properties
-       0,    0, // enums/sets
+       5,   14, // properties
+       2,   39, // enums/sets
        0,    0, // constructors
        0,       // flags
        0,       // signalCount
@@ -173,6 +184,28 @@ Q_CONSTINIT static const uint qt_meta_data_ZN18TransformComponentE[] = {
        2, QMetaType::QPointF, 0x00015003, uint(1879048193), 0,
        3, QMetaType::Double, 0x00015003, uint(1879048193), 0,
        4, QMetaType::QPointF, 0x00015003, uint(1879048193), 0,
+       5, 0x80000000 | 6, 0x0001500b, uint(1879048193), 0,
+       7, 0x80000000 | 6, 0x0001500b, uint(1879048193), 0,
+
+ // enums: name, alias, flags, count, data
+       8,    8, 0x2,    7,   49,
+       6,    8, 0x3,    7,   63,
+
+ // enum data: key, value
+       9, uint(TransformComponent::Anchor::NONE),
+      10, uint(TransformComponent::Anchor::LEFT),
+      11, uint(TransformComponent::Anchor::RIGHT),
+      12, uint(TransformComponent::Anchor::TOP),
+      13, uint(TransformComponent::Anchor::BOTTOM),
+      14, uint(TransformComponent::Anchor::CENTER_X),
+      15, uint(TransformComponent::Anchor::CENTER_Y),
+       9, uint(TransformComponent::Anchor::NONE),
+      10, uint(TransformComponent::Anchor::LEFT),
+      11, uint(TransformComponent::Anchor::RIGHT),
+      12, uint(TransformComponent::Anchor::TOP),
+      13, uint(TransformComponent::Anchor::BOTTOM),
+      14, uint(TransformComponent::Anchor::CENTER_X),
+      15, uint(TransformComponent::Anchor::CENTER_Y),
 
        0        // eod
 };
@@ -190,6 +223,14 @@ Q_CONSTINIT const QMetaObject TransformComponent::staticMetaObject = { {
         QtPrivate::TypeAndForceComplete<double, std::true_type>,
         // property 'scale'
         QtPrivate::TypeAndForceComplete<QPointF, std::true_type>,
+        // property 'anchors'
+        QtPrivate::TypeAndForceComplete<AnchorFlags, std::true_type>,
+        // property 'stretch'
+        QtPrivate::TypeAndForceComplete<AnchorFlags, std::true_type>,
+        // enum 'Anchor'
+        QtPrivate::TypeAndForceComplete<TransformComponent::Anchor, std::true_type>,
+        // enum 'AnchorFlags'
+        QtPrivate::TypeAndForceComplete<TransformComponent::AnchorFlags, std::true_type>,
         // Q_OBJECT / Q_GADGET
         QtPrivate::TypeAndForceComplete<TransformComponent, std::true_type>
     >,
@@ -199,12 +240,22 @@ Q_CONSTINIT const QMetaObject TransformComponent::staticMetaObject = { {
 void TransformComponent::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id, void **_a)
 {
     auto *_t = static_cast<TransformComponent *>(_o);
+    if (_c == QMetaObject::RegisterPropertyMetaType) {
+        switch (_id) {
+        default: *reinterpret_cast<int*>(_a[0]) = -1; break;
+        case 4:
+        case 3:
+            *reinterpret_cast<int*>(_a[0]) = qRegisterMetaType< AnchorFlags >(); break;
+        }
+    }
     if (_c == QMetaObject::ReadProperty) {
         void *_v = _a[0];
         switch (_id) {
         case 0: *reinterpret_cast< QPointF*>(_v) = _t->GetPosition(); break;
         case 1: *reinterpret_cast< double*>(_v) = _t->GetRotationDegrees(); break;
         case 2: *reinterpret_cast< QPointF*>(_v) = _t->GetScale(); break;
+        case 3: *reinterpret_cast<int*>(_v) = QFlag(_t->GetAnchors()); break;
+        case 4: *reinterpret_cast<int*>(_v) = QFlag(_t->GetStretch()); break;
         default: break;
         }
     }
@@ -214,6 +265,8 @@ void TransformComponent::qt_static_metacall(QObject *_o, QMetaObject::Call _c, i
         case 0: _t->SetPosition(*reinterpret_cast< QPointF*>(_v)); break;
         case 1: _t->SetRotationDegrees(*reinterpret_cast< double*>(_v)); break;
         case 2: _t->SetScale(*reinterpret_cast< QPointF*>(_v)); break;
+        case 3: _t->SetAnchors(QFlag(*reinterpret_cast<int*>(_v))); break;
+        case 4: _t->SetStretch(QFlag(*reinterpret_cast<int*>(_v))); break;
         default: break;
         }
     }
@@ -241,7 +294,7 @@ int TransformComponent::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
             || _c == QMetaObject::ResetProperty || _c == QMetaObject::BindableProperty
             || _c == QMetaObject::RegisterPropertyMetaType) {
         qt_static_metacall(this, _c, _id, _a);
-        _id -= 3;
+        _id -= 5;
     }
     return _id;
 }
@@ -261,7 +314,8 @@ static constexpr auto qt_meta_stringdata_ZN14ImageComponentE = QtMocHelpers::str
     "ImageComponent",
     "ComponentChanged",
     "imagePath",
-    "tint"
+    "tint",
+    "assetPath"
 );
 #else  // !QT_MOC_HAS_STRINGDATA
 #error "qtmochelpers.h not found or too old."
@@ -274,7 +328,7 @@ Q_CONSTINIT static const uint qt_meta_data_ZN14ImageComponentE[] = {
        0,       // classname
        0,    0, // classinfo
        0,    0, // methods
-       2,   14, // properties
+       3,   14, // properties
        0,    0, // enums/sets
        0,    0, // constructors
        0,       // flags
@@ -283,6 +337,7 @@ Q_CONSTINIT static const uint qt_meta_data_ZN14ImageComponentE[] = {
  // properties: name, type, flags, notifyId, revision
        2, QMetaType::QString, 0x00015003, uint(1879048193), 0,
        3, QMetaType::QColor, 0x00015003, uint(1879048193), 0,
+       4, QMetaType::QString, 0x00015003, uint(1879048193), 0,
 
        0        // eod
 };
@@ -298,6 +353,8 @@ Q_CONSTINIT const QMetaObject ImageComponent::staticMetaObject = { {
         QtPrivate::TypeAndForceComplete<QString, std::true_type>,
         // property 'tint'
         QtPrivate::TypeAndForceComplete<QColor, std::true_type>,
+        // property 'assetPath'
+        QtPrivate::TypeAndForceComplete<QString, std::true_type>,
         // Q_OBJECT / Q_GADGET
         QtPrivate::TypeAndForceComplete<ImageComponent, std::true_type>
     >,
@@ -312,6 +369,7 @@ void ImageComponent::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _
         switch (_id) {
         case 0: *reinterpret_cast< QString*>(_v) = _t->GetImagePath(); break;
         case 1: *reinterpret_cast< QColor*>(_v) = _t->GetTint(); break;
+        case 2: *reinterpret_cast< QString*>(_v) = _t->GetAssetPath(); break;
         default: break;
         }
     }
@@ -320,6 +378,7 @@ void ImageComponent::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _
         switch (_id) {
         case 0: _t->SetImagePath(*reinterpret_cast< QString*>(_v)); break;
         case 1: _t->SetTint(*reinterpret_cast< QColor*>(_v)); break;
+        case 2: _t->SetAssetPath(*reinterpret_cast< QString*>(_v)); break;
         default: break;
         }
     }
@@ -347,7 +406,7 @@ int ImageComponent::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
             || _c == QMetaObject::ResetProperty || _c == QMetaObject::BindableProperty
             || _c == QMetaObject::RegisterPropertyMetaType) {
         qt_static_metacall(this, _c, _id, _a);
-        _id -= 2;
+        _id -= 3;
     }
     return _id;
 }
@@ -369,7 +428,9 @@ static constexpr auto qt_meta_stringdata_ZN13TextComponentE = QtMocHelpers::stri
     "text",
     "fontFamily",
     "pixelSize",
-    "color"
+    "color",
+    "fontPath",
+    "assetPath"
 );
 #else  // !QT_MOC_HAS_STRINGDATA
 #error "qtmochelpers.h not found or too old."
@@ -382,7 +443,7 @@ Q_CONSTINIT static const uint qt_meta_data_ZN13TextComponentE[] = {
        0,       // classname
        0,    0, // classinfo
        0,    0, // methods
-       4,   14, // properties
+       6,   14, // properties
        0,    0, // enums/sets
        0,    0, // constructors
        0,       // flags
@@ -393,6 +454,8 @@ Q_CONSTINIT static const uint qt_meta_data_ZN13TextComponentE[] = {
        3, QMetaType::QString, 0x00015003, uint(1879048193), 0,
        4, QMetaType::Int, 0x00015003, uint(1879048193), 0,
        5, QMetaType::QColor, 0x00015003, uint(1879048193), 0,
+       6, QMetaType::QString, 0x00015003, uint(1879048193), 0,
+       7, QMetaType::QString, 0x00015003, uint(1879048193), 0,
 
        0        // eod
 };
@@ -412,6 +475,10 @@ Q_CONSTINIT const QMetaObject TextComponent::staticMetaObject = { {
         QtPrivate::TypeAndForceComplete<int, std::true_type>,
         // property 'color'
         QtPrivate::TypeAndForceComplete<QColor, std::true_type>,
+        // property 'fontPath'
+        QtPrivate::TypeAndForceComplete<QString, std::true_type>,
+        // property 'assetPath'
+        QtPrivate::TypeAndForceComplete<QString, std::true_type>,
         // Q_OBJECT / Q_GADGET
         QtPrivate::TypeAndForceComplete<TextComponent, std::true_type>
     >,
@@ -428,6 +495,8 @@ void TextComponent::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _i
         case 1: *reinterpret_cast< QString*>(_v) = _t->GetFontFamily(); break;
         case 2: *reinterpret_cast< int*>(_v) = _t->GetPixelSize(); break;
         case 3: *reinterpret_cast< QColor*>(_v) = _t->GetColor(); break;
+        case 4: *reinterpret_cast< QString*>(_v) = _t->GetFontPath(); break;
+        case 5: *reinterpret_cast< QString*>(_v) = _t->GetAssetPath(); break;
         default: break;
         }
     }
@@ -438,6 +507,8 @@ void TextComponent::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _i
         case 1: _t->SetFontFamily(*reinterpret_cast< QString*>(_v)); break;
         case 2: _t->SetPixelSize(*reinterpret_cast< int*>(_v)); break;
         case 3: _t->SetColor(*reinterpret_cast< QColor*>(_v)); break;
+        case 4: _t->SetFontPath(*reinterpret_cast< QString*>(_v)); break;
+        case 5: _t->SetAssetPath(*reinterpret_cast< QString*>(_v)); break;
         default: break;
         }
     }
@@ -465,7 +536,7 @@ int TextComponent::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
             || _c == QMetaObject::ResetProperty || _c == QMetaObject::BindableProperty
             || _c == QMetaObject::RegisterPropertyMetaType) {
         qt_static_metacall(this, _c, _id, _a);
-        _id -= 4;
+        _id -= 6;
     }
     return _id;
 }
@@ -486,7 +557,11 @@ static constexpr auto qt_meta_stringdata_ZN15ButtonComponentE = QtMocHelpers::st
     "ComponentChanged",
     "text",
     "backgroundColor",
-    "textColor"
+    "textColor",
+    "fontFamily",
+    "pixelSize",
+    "fontPath",
+    "assetPath"
 );
 #else  // !QT_MOC_HAS_STRINGDATA
 #error "qtmochelpers.h not found or too old."
@@ -499,7 +574,7 @@ Q_CONSTINIT static const uint qt_meta_data_ZN15ButtonComponentE[] = {
        0,       // classname
        0,    0, // classinfo
        0,    0, // methods
-       3,   14, // properties
+       7,   14, // properties
        0,    0, // enums/sets
        0,    0, // constructors
        0,       // flags
@@ -509,6 +584,10 @@ Q_CONSTINIT static const uint qt_meta_data_ZN15ButtonComponentE[] = {
        2, QMetaType::QString, 0x00015003, uint(1879048193), 0,
        3, QMetaType::QColor, 0x00015003, uint(1879048193), 0,
        4, QMetaType::QColor, 0x00015003, uint(1879048193), 0,
+       5, QMetaType::QString, 0x00015003, uint(1879048193), 0,
+       6, QMetaType::Int, 0x00015003, uint(1879048193), 0,
+       7, QMetaType::QString, 0x00015003, uint(1879048193), 0,
+       8, QMetaType::QString, 0x00015003, uint(1879048193), 0,
 
        0        // eod
 };
@@ -526,6 +605,14 @@ Q_CONSTINIT const QMetaObject ButtonComponent::staticMetaObject = { {
         QtPrivate::TypeAndForceComplete<QColor, std::true_type>,
         // property 'textColor'
         QtPrivate::TypeAndForceComplete<QColor, std::true_type>,
+        // property 'fontFamily'
+        QtPrivate::TypeAndForceComplete<QString, std::true_type>,
+        // property 'pixelSize'
+        QtPrivate::TypeAndForceComplete<int, std::true_type>,
+        // property 'fontPath'
+        QtPrivate::TypeAndForceComplete<QString, std::true_type>,
+        // property 'assetPath'
+        QtPrivate::TypeAndForceComplete<QString, std::true_type>,
         // Q_OBJECT / Q_GADGET
         QtPrivate::TypeAndForceComplete<ButtonComponent, std::true_type>
     >,
@@ -541,6 +628,10 @@ void ButtonComponent::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int 
         case 0: *reinterpret_cast< QString*>(_v) = _t->GetText(); break;
         case 1: *reinterpret_cast< QColor*>(_v) = _t->GetBackgroundColor(); break;
         case 2: *reinterpret_cast< QColor*>(_v) = _t->GetTextColor(); break;
+        case 3: *reinterpret_cast< QString*>(_v) = _t->GetFontFamily(); break;
+        case 4: *reinterpret_cast< int*>(_v) = _t->GetPixelSize(); break;
+        case 5: *reinterpret_cast< QString*>(_v) = _t->GetFontPath(); break;
+        case 6: *reinterpret_cast< QString*>(_v) = _t->GetAssetPath(); break;
         default: break;
         }
     }
@@ -550,6 +641,10 @@ void ButtonComponent::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int 
         case 0: _t->SetText(*reinterpret_cast< QString*>(_v)); break;
         case 1: _t->SetBackgroundColor(*reinterpret_cast< QColor*>(_v)); break;
         case 2: _t->SetTextColor(*reinterpret_cast< QColor*>(_v)); break;
+        case 3: _t->SetFontFamily(*reinterpret_cast< QString*>(_v)); break;
+        case 4: _t->SetPixelSize(*reinterpret_cast< int*>(_v)); break;
+        case 5: _t->SetFontPath(*reinterpret_cast< QString*>(_v)); break;
+        case 6: _t->SetAssetPath(*reinterpret_cast< QString*>(_v)); break;
         default: break;
         }
     }
@@ -577,7 +672,7 @@ int ButtonComponent::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
             || _c == QMetaObject::ResetProperty || _c == QMetaObject::BindableProperty
             || _c == QMetaObject::RegisterPropertyMetaType) {
         qt_static_metacall(this, _c, _id, _a);
-        _id -= 3;
+        _id -= 7;
     }
     return _id;
 }

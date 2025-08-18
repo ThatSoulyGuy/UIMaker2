@@ -1,8 +1,49 @@
 #include "SceneDocument.hpp"
+#include <QBrush>
 
-SceneDocument::SceneDocument(QObject* parent) : QObject(parent), root(new UiElement("Root")), scene(new QGraphicsScene(this))
+SceneDocument::SceneDocument(QObject* parent) : QObject(parent), root(new UiElement("Root")), scene(new QGraphicsScene(this)), rootRect(nullptr)
 {
     scene->setSceneRect(QRectF(0.0, 0.0, 1920.0, 1080.0));
+
+    {
+        const int tileSize = 32;
+        const int dotSpacing = 16;
+        const qreal dotRadius = 1.2;
+
+        QPixmap tile(tileSize, tileSize);
+        tile.fill(QColor(35, 35, 38));
+
+        QPainter painter(&tile);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(110, 110, 115));
+
+        for (int y = 0; y < tileSize; y += dotSpacing)
+        {
+            for (int x = 0; x < tileSize; x += dotSpacing)
+            {
+                painter.drawEllipse(QPointF(x + 0.5, y + 0.5), dotRadius, dotRadius);
+            }
+        }
+        painter.end();
+
+        scene->setBackgroundBrush(QBrush(tile));
+    }
+
+    {
+        QPen borderPen(QColor(220, 220, 220));
+        borderPen.setCosmetic(true);
+        borderPen.setWidth(1);
+
+        rootRect = scene->addRect(scene->sceneRect(), borderPen, Qt::NoBrush);
+        rootRect->setZValue(-1);
+    }
+
+    QObject::connect(scene, &QGraphicsScene::sceneRectChanged, this, [this](const QRectF& r)
+    {
+        if (rootRect)
+            rootRect->setRect(r);
+    });
 }
 
 SceneElementItem* SceneDocument::CreateItemFor(UiElement* e)
@@ -128,6 +169,9 @@ bool SceneDocument::LoadJson(const QByteArray& data)
 
     scene->clear();
     items.clear();
+
+    rootRect = scene->addRect(scene->sceneRect(), Qt::NoPen, QBrush(Qt::white));
+    rootRect->setZValue(-1);
 
     delete root;
     root = new UiElement("Root");

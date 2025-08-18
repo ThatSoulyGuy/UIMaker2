@@ -1,6 +1,8 @@
 #include <QClipboard>
 #include <QMessageBox>
 #include <QTimer>
+#include <QWheelEvent>
+#include <QScrollBar>
 #include "MainWindow.hpp"
 #include "./ui_mainwindow.h"
 
@@ -11,7 +13,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::UIMake
     document = new SceneDocument(this);
 
     ui->graphicsView->setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
+    ui->graphicsView->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+    ui->graphicsView->setResizeAnchor(QGraphicsView::AnchorViewCenter);
     ui->graphicsView->setDragMode(QGraphicsView::RubberBandDrag);
+    ui->graphicsView->setMouseTracking(true);
     ui->graphicsView->installEventFilter(this);
 
     ui->graphicsView->setScene(document->GetScene());
@@ -58,6 +63,134 @@ void MainWindow::BuildHierarchyDock()
     connect(hierarchySelection, &QItemSelectionModel::currentChanged, this, [this](const QModelIndex& current, const QModelIndex&){ UiElement* e = hierarchyModel->GetElementFromIndex(current); document->SetSelected(e); propertyPanel->SetTarget(e); });
     connect(hierarchyModel, &EntityTreeModel::HierarchyChanged, this, [this](){ hierarchyView->expandAll(); });
 }
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == ui->graphicsView->viewport() || watched == ui->graphicsView)
+    {
+        if (event->type() == QEvent::Wheel)
+        {
+            auto* wheel = static_cast<QWheelEvent*>(event);
+            const int delta = wheel->angleDelta().y();
+
+            if (delta != 0)
+            {
+                const double factor = std::pow(1.0015, static_cast<double>(delta));
+                ZoomAt(wheel->position().toPoint(), factor);
+                event->accept();
+                return true;
+            }
+        }
+
+        if (event->type() == QEvent::MouseButtonPress)
+        {
+            auto* me = static_cast<QMouseEvent*>(event);
+
+            const bool spaceHeld = (QApplication::keyboardModifiers() & Qt::KeyboardModifier::ControlModifier) == 0 ? (QApplication::keyboardModifiers() & Qt::KeyboardModifier::ShiftModifier) == 0 ? (QApplication::keyboardModifiers() & Qt::KeyboardModifier::AltModifier) == 0 ? (QApplication::keyboardModifiers() & Qt::KeyboardModifier::MetaModifier) == 0 ? (QApplication::keyboardModifiers() & Qt::KeyboardModifier::KeyboardModifierMask) == Qt::KeyboardModifier::NoModifier ? false : (QApplication::keyboardModifiers() & Qt::KeyboardModifier::KeyboardModifierMask) == Qt::KeyboardModifier::NoModifier : false : false : false : false; // keep single-line per your rule
+
+            if (me->button() == Qt::MiddleButton || (me->button() == Qt::LeftButton && (QApplication::keyboardModifiers() & Qt::KeyboardModifier::ShiftModifier)))
+            {
+                isPanning = true;
+                lastPanPoint = me->pos();
+
+                ui->graphicsView->setCursor(Qt::ClosedHandCursor);
+                ui->graphicsView->setDragMode(QGraphicsView::NoDrag);
+
+                event->accept();
+
+                return true;
+            }
+        }
+
+        if (event->type() == QEvent::MouseMove && isPanning)
+        {
+            auto* me = static_cast<QMouseEvent*>(event);
+            const QPoint delta = me->pos() - lastPanPoint;
+            lastPanPoint = me->pos();
+
+            ui->graphicsView->horizontalScrollBar()->setValue(ui->graphicsView->horizontalScrollBar()->value() - delta.x());
+            ui->graphicsView->verticalScrollBar()->setValue(ui->graphicsView->verticalScrollBar()->value() - delta.y());
+
+            event->accept();
+
+            return true;
+        }
+
+        if (event->type() == QEvent::MouseButtonRelease && isPanning)
+        {
+            auto* me = static_cast<QMouseEvent*>(event);
+
+            if (me->button() == Qt::MiddleButton || me->button() == Qt::LeftButton)
+            {
+                isPanning = false;
+
+                ui->graphicsView->setCursor(Qt::ArrowCursor);
+                ui->graphicsView->setDragMode(QGraphicsView::RubberBandDrag);
+
+                event->accept();
+
+                return true;
+            }
+        }
+
+        if (event->type() == QEvent::MouseButtonDblClick)
+        {
+            auto* me = static_cast<QMouseEvent*>(event);
+
+            if (me->button() == Qt::LeftButton)
+            {
+                const QPointF scenePos = ui->graphicsView->mapToScene(me->pos());
+
+                if (auto* s = document->GetScene())
+                {
+                    QGraphicsItem* item = nullptr;
+                    const QList<QGraphicsItem*> hit = s->items(scenePos);
+
+                    for (QGraphicsItem* it : hit)
+                    {
+                        if (it->flags().testFlag(QGraphicsItem::ItemIsSelectable))
+                        {
+                            item = it;
+                            break;
+                        }
+                    }
+
+                    if (item != nullptr)
+                    {
+                        FitItem(item);
+
+                        event->accept();
+
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // --- Keyboard shortcuts: F to focus selection, Ctrl+0 to fit whole scene ---
+        if (event->type() == QEvent::KeyPress)
+        {
+            auto* ke = static_cast<QKeyEvent*>(event);
+            if (ke->key() == Qt::Key_F)
+            {
+                if (auto* s = document->GetScene())
+                {
+                    const auto selected = s->selectedItems();
+                    if (!selected.isEmpty()) { FitItem(selected.first()); event->accept(); return true; }
+                }
+            }
+            if ((ke->modifiers() & Qt::ControlModifier) && ke->key() == Qt::Key_0)
+            {
+                ui->graphicsView->fitInView(document->GetScene()->sceneRect(), Qt::KeepAspectRatio);
+                event->accept();
+                return true;
+            }
+        }
+    }
+
+    return QMainWindow::eventFilter(watched, event);
+}
+
 
 void MainWindow::BuildPropertyDock()
 {
@@ -216,4 +349,39 @@ void MainWindow::AttachScene(QGraphicsScene* scene)
     {
         if (!ui->graphicsView->viewport()->size().isEmpty()) { ui->graphicsView->fitInView(scene->sceneRect(), Qt::KeepAspectRatio); }
     });
+}
+
+void MainWindow::ZoomAt(const QPoint& viewPos, double factor)
+{
+    QTransform t = ui->graphicsView->transform();
+
+    const double current = t.m11();
+    double clampedFactor = factor;
+
+    if (current * factor < minZoom)
+        clampedFactor = minZoom / current;
+    if (current * factor > maxZoom)
+        clampedFactor = maxZoom / current;
+
+    if (std::abs(clampedFactor - 1.0) < 1e-9) { return; }
+
+    const QPointF scenePosBefore = ui->graphicsView->mapToScene(viewPos);
+
+    ui->graphicsView->scale(clampedFactor, clampedFactor);
+
+    const QPointF scenePosAfter = ui->graphicsView->mapToScene(viewPos);
+
+    const QPointF delta = scenePosAfter - scenePosBefore;
+
+    ui->graphicsView->translate(delta.x(), delta.y());
+}
+
+void MainWindow::FitItem(QGraphicsItem* item)
+{
+    if (!item)
+        return;
+
+    const QRectF r = item->sceneBoundingRect().adjusted(-20.0, -20.0, 20.0, 20.0);
+
+    ui->graphicsView->fitInView(r, Qt::KeepAspectRatio);
 }

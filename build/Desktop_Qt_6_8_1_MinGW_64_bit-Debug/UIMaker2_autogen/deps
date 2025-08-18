@@ -5,6 +5,7 @@ UIMaker2_autogen/timestamp: \
 	D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QJsonObject \
 	D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMap \
 	D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaProperty \
+	D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaType \
 	D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMimeData \
 	D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QObject \
 	D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QPointF \
@@ -155,6 +156,7 @@ UIMaker2_autogen/timestamp: \
 	D:/Qt/Install/6.8.1/mingw_64/include/QtCore/qyieldcpu.h \
 	D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QColor \
 	D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFont \
+	D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFontDatabase \
 	D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QPainter \
 	D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QPixmap \
 	D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qaction.h \

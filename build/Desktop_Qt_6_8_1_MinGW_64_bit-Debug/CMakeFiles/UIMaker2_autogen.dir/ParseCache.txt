@@ -7,6 +7,7 @@ D:/Qt/Projects/UIMaker2/MainWindow.hpp
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QJsonObject
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMap
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaProperty
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaType
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMimeData
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QObject
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QPointF
@@ -157,6 +158,7 @@ D:/Qt/Projects/UIMaker2/MainWindow.hpp
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/qyieldcpu.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QColor
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFont
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFontDatabase
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QPainter
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QPixmap
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qaction.h
@@ -501,6 +503,7 @@ D:/Qt/Projects/UIMaker2/EntityComponentSystem.hpp
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QJsonDocument
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QJsonObject
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaProperty
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaType
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QObject
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QPointF
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QString
@@ -634,8 +637,10 @@ D:/Qt/Projects/UIMaker2/EntityComponentSystem.hpp
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/qyieldcpu.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QColor
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFont
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFontDatabase
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qcolor.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfont.h
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfontdatabase.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qrgb.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qrgba64.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qtgui-config.h
@@ -857,6 +862,7 @@ D:/Qt/Projects/UIMaker2/EntityTreeModel.hpp
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QJsonDocument
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QJsonObject
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaProperty
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaType
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMimeData
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QObject
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QPointF
@@ -993,8 +999,10 @@ D:/Qt/Projects/UIMaker2/EntityTreeModel.hpp
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/qyieldcpu.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QColor
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFont
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFontDatabase
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qcolor.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfont.h
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfontdatabase.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qrgb.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qrgba64.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qtgui-config.h
@@ -1216,6 +1224,7 @@ D:/Qt/Projects/UIMaker2/PropertyEditorPanel.hpp
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QJsonDocument
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QJsonObject
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaProperty
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaType
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QObject
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QPointF
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QString
@@ -1364,6 +1373,7 @@ D:/Qt/Projects/UIMaker2/PropertyEditorPanel.hpp
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/qyieldcpu.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QColor
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFont
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFontDatabase
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qaction.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qbitmap.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qbrush.h
@@ -1689,6 +1699,7 @@ D:/Qt/Projects/UIMaker2/SceneDocument.hpp
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QJsonObject
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMap
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaProperty
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaType
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QObject
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QPointF
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QString
@@ -1828,11 +1839,13 @@ D:/Qt/Projects/UIMaker2/SceneDocument.hpp
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/qyieldcpu.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QColor
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFont
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFontDatabase
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QPainter
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QPixmap
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qbrush.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qcolor.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfont.h
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfontdatabase.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfontinfo.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfontmetrics.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qimage.h
@@ -2076,6 +2089,7 @@ D:/Qt/Projects/UIMaker2/SceneElementItem.hpp
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QJsonDocument
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QJsonObject
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaProperty
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaType
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QObject
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QPointF
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QString
@@ -2215,11 +2229,13 @@ D:/Qt/Projects/UIMaker2/SceneElementItem.hpp
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtCore/qyieldcpu.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QColor
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFont
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFontDatabase
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QPainter
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QPixmap
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qbrush.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qcolor.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfont.h
+ mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfontdatabase.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfontinfo.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfontmetrics.h
  mdp:D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qimage.h

@@ -5,6 +5,7 @@ D:/Qt/Projects/UIMaker2/build/Desktop_Qt_6_8_1_MinGW_64_bit-Debug/UIMaker2_autog
   D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QJsonDocument \
   D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QJsonObject \
   D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaProperty \
+  D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMetaType \
   D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QMimeData \
   D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QObject \
   D:/Qt/Install/6.8.1/mingw_64/include/QtCore/QPointF \
@@ -141,8 +142,10 @@ D:/Qt/Projects/UIMaker2/build/Desktop_Qt_6_8_1_MinGW_64_bit-Debug/UIMaker2_autog
   D:/Qt/Install/6.8.1/mingw_64/include/QtCore/qyieldcpu.h \
   D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QColor \
   D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFont \
+  D:/Qt/Install/6.8.1/mingw_64/include/QtGui/QFontDatabase \
   D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qcolor.h \
   D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfont.h \
+  D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qfontdatabase.h \
   D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qrgb.h \
   D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qrgba64.h \
   D:/Qt/Install/6.8.1/mingw_64/include/QtGui/qtgui-config.h \

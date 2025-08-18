@@ -1,5 +1,6 @@
 #include "SceneElementItem.hpp"
 #include <QFontMetrics>
+#include <QGraphicsScene>
 #include <cmath>
 
 SceneElementItem::SceneElementItem(UiElement* element) : QGraphicsObject(nullptr), element(element), localRect(-50.0, -25.0, 100.0, 50.0)
@@ -29,10 +30,6 @@ void SceneElementItem::RefreshFromComponents()
     if (xform == nullptr)
         xform = element->AddComponent<TransformComponent>();
 
-    setPos(xform->GetPosition());
-    setRotation(xform->GetRotationDegrees());
-    setScale(std::max(0.0001, xform->GetScale().x()));
-
     QRectF newRect = localRect;
     QPixmap newPixmap;
 
@@ -41,7 +38,6 @@ void SceneElementItem::RefreshFromComponents()
         if (!img->GetImagePath().isEmpty())
         {
             QPixmap loaded(img->GetImagePath());
-
             if (!loaded.isNull())
             {
                 newPixmap = loaded;
@@ -52,16 +48,38 @@ void SceneElementItem::RefreshFromComponents()
     else if (auto* text = element->GetComponent<TextComponent>())
     {
         QFont font(text->GetFontFamily(), text->GetPixelSize());
-        QFontMetrics fm(font);
+        QFontMetrics fontMetrics(font);
 
-        const QSize size(fm.horizontalAdvance(text->GetText()), fm.height());
+        const QSize size(fontMetrics.horizontalAdvance(text->GetText()), fontMetrics.height());
 
         newRect = QRectF(QPointF(0.0, 0.0), size);
     }
-    else if (element->GetComponent<ButtonComponent>())
-        newRect = QRectF(0.0, 0.0, 160.0, 48.0);
+    else if (auto* button = element->GetComponent<ButtonComponent>())
+    {
+        QFont font(button->GetFontFamily(), button->GetPixelSize());
+        QFontMetrics fm(font);
+
+        const QSize size(fm.horizontalAdvance(button->GetText()) + 40, fm.height() + 20);
+
+        newRect = QRectF(QPointF(0.0, 0.0), size);
+    }
     else
         newRect = QRectF(0.0, 0.0, 100.0, 50.0);
+
+    QRectF parentRect;
+
+    if (auto* p = parentItem())
+        parentRect = p->boundingRect();
+    else if (scene())
+        parentRect = scene()->sceneRect();
+
+    QPointF pos = xform->GetPosition();
+    auto stretch = xform->GetStretch();
+
+    if (stretch.testFlag(Anchor::LEFT) && stretch.testFlag(Anchor::RIGHT))
+        newRect.setWidth(parentRect.width() - pos.x() * 2.0);
+    if (stretch.testFlag(Anchor::TOP) && stretch.testFlag(Anchor::BOTTOM))
+        newRect.setHeight(parentRect.height() - pos.y() * 2.0);
 
     if (newRect != localRect)
     {
@@ -70,14 +88,56 @@ void SceneElementItem::RefreshFromComponents()
     }
 
     pixmap = newPixmap;
+
+    auto anchors = xform->GetAnchors();
+
+    double x = pos.x();
+    double y = pos.y();
+
+    if (anchors.testFlag(Anchor::RIGHT))
+        x = parentRect.width() - localRect.width() - pos.x();
+    else if (anchors.testFlag(Anchor::CENTER_X))
+        x = (parentRect.width() - localRect.width()) * 0.5 + pos.x();
+
+    if (anchors.testFlag(Anchor::BOTTOM))
+        y = parentRect.height() - localRect.height() - pos.y();
+    else if (anchors.testFlag(Anchor::CENTER_Y))
+        y = (parentRect.height() - localRect.height()) * 0.5 + pos.y();
+
+    setPos(parentRect.topLeft() + QPointF(x, y));
+    setRotation(xform->GetRotationDegrees());
+    setScale(std::max(0.0001, xform->GetScale().x()));
 }
+
 
 QVariant SceneElementItem::itemChange(GraphicsItemChange change, const QVariant& value)
 {
     if (change == ItemPositionHasChanged)
     {
         if (auto* xform = element->GetComponent<TransformComponent>())
-            xform->SetPosition(pos());
+        {
+            QRectF parentRect;
+
+            if (auto* p = parentItem())
+                parentRect = p->boundingRect();
+            else if (scene())
+                parentRect = scene()->sceneRect();
+
+            auto anchors = xform->GetAnchors();
+            QPointF p = pos() - parentRect.topLeft();
+
+            if (anchors.testFlag(Anchor::RIGHT))
+                p.setX(parentRect.width() - localRect.width() - p.x());
+            else if (anchors.testFlag(Anchor::CENTER_X))
+                p.setX(p.x() - (parentRect.width() - localRect.width()) * 0.5);
+
+            if (anchors.testFlag(Anchor::BOTTOM))
+                p.setY(parentRect.height() - localRect.height() - p.y());
+            else if (anchors.testFlag(Anchor::CENTER_Y))
+                p.setY(p.y() - (parentRect.height() - localRect.height()) * 0.5);
+
+            xform->SetPosition(p);
+        }
     }
 
     if (change == ItemRotationHasChanged)
@@ -94,6 +154,7 @@ QVariant SceneElementItem::itemChange(GraphicsItemChange change, const QVariant&
 
     return QGraphicsObject::itemChange(change, value);
 }
+
 
 void SceneElementItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*)
 {
@@ -144,6 +205,8 @@ void SceneElementItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*,
         painter->setBrush(button->GetBackgroundColor());
         painter->drawRoundedRect(localRect, 6.0, 6.0);
         painter->setPen(button->GetTextColor());
+        QFont font(button->GetFontFamily(), button->GetPixelSize());
+        painter->setFont(font);
         painter->drawText(localRect, Qt::AlignCenter, button->GetText());
 
         if (isSelected())
