@@ -21,6 +21,7 @@
 #include <vector>
 #include <functional>
 #include <algorithm>
+#include "SceneElementItem.hpp"
 
 class Component : public QObject
 {
@@ -92,8 +93,16 @@ public:
 
     explicit TransformComponent(QObject* parent = nullptr) : Component(parent), position(0.0, 0.0), rotationDegrees(0.0), scale(1.0, 1.0), anchors((int)Anchor::LEFT | (int)Anchor::TOP), stretch(Anchor::NONE) { }
 
-    QString GetTypeName() const override { return QStringLiteral("Transform"); }
-    int UpdateOrder() const override { return 1; }
+    QString GetTypeName() const override
+    {
+        return QStringLiteral("Transform");
+    }
+
+    int UpdateOrder() const override
+    {
+        return 1;
+    }
+
     void Update(class SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override
     {
         Q_UNUSED(item);
@@ -235,11 +244,10 @@ private:
     QPointF scale;
     AnchorFlags anchors;
     AnchorFlags stretch;
-    static inline const bool registered;
+
+    static const bool registered;
 
 };
-
-inline const bool TransformComponent::registered = [](){ Component::Register("Transform", [](QObject* parent){ return new TransformComponent(parent); }); return true; }();
 
 using Anchor = TransformComponent::Anchor;
 using AnchorFlags = TransformComponent::AnchorFlags;
@@ -258,14 +266,20 @@ public:
 
     explicit ImageComponent(QObject* parent = nullptr) : Component(parent), tint(Qt::white) { }
 
-    QString GetTypeName() const override { return QStringLiteral("Image"); }
+    QString GetTypeName() const override
+    {
+        return QStringLiteral("Image");
+    }
+
     void Update(class SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override
     {
         Q_UNUSED(item);
         Q_UNUSED(parentRect);
+
         if (!imagePath.isEmpty())
         {
             QPixmap loaded(imagePath);
+
             if (!loaded.isNull())
             {
                 pixmap = loaded;
@@ -277,16 +291,20 @@ public:
     {
         if (pixmap.isNull())
             return false;
+
         painter->save();
         painter->setOpacity(1.0);
         painter->drawPixmap(rect.topLeft(), pixmap);
+
         if (selected)
         {
             painter->setPen(QPen(QColor(0, 180, 255), 2, Qt::DashLine));
             painter->setBrush(Qt::NoBrush);
             painter->drawRect(rect);
         }
+
         painter->restore();
+
         return true;
     }
 
@@ -357,11 +375,10 @@ private:
     QColor tint;
     QString assetPath;
     QPixmap pixmap;
-    static inline const bool registered;
+
+    static const bool registered;
 
 };
-
-inline const bool ImageComponent::registered = [](){ Component::Register("Image", [](QObject* parent){ return new ImageComponent(parent); }); return true; }();
 
 class TextComponent : public Component
 {
@@ -383,7 +400,9 @@ public:
         Q_UNUSED(parentRect);
         QFont font(fontFamily, pixelSize);
         QFontMetrics fm(font);
+
         const QSize size(fm.horizontalAdvance(text), fm.height());
+
         rect = QRectF(QPointF(0.0, 0.0), size);
     }
     bool Paint(QPainter* painter, const QRectF& rect, bool selected) override
@@ -393,13 +412,16 @@ public:
         painter->setFont(font);
         painter->setPen(color);
         painter->drawText(rect.topLeft() + QPointF(0.0, rect.height() - 4.0), text);
+
         if (selected)
         {
             painter->setPen(QPen(QColor(0, 180, 255), 2, Qt::DashLine));
             painter->setBrush(Qt::NoBrush);
             painter->drawRect(rect);
         }
+
         painter->restore();
+
         return true;
     }
 
@@ -534,11 +556,10 @@ private:
     QColor color;
     QString fontPath;
     QString assetPath;
-    static inline const bool registered;
+
+    static const bool registered;
 
 };
-
-inline const bool TextComponent::registered = [](){ Component::Register("Text", [](QObject* parent){ return new TextComponent(parent); }); return true; }();
 
 class ButtonComponent : public Component
 {
@@ -555,14 +576,20 @@ public:
 
     explicit ButtonComponent(QObject* parent = nullptr) : Component(parent), backgroundColor(QColor(40, 40, 40)), textColor(Qt::white), fontFamily("Inter"), pixelSize(24) { }
 
-    QString GetTypeName() const override { return QStringLiteral("Button"); }
+    QString GetTypeName() const override
+    {
+        return QStringLiteral("Button");
+    }
+
     void Update(class SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override
     {
         Q_UNUSED(item);
         Q_UNUSED(parentRect);
         QFont font(fontFamily, pixelSize);
         QFontMetrics fm(font);
+
         const QSize size(fm.horizontalAdvance(text) + 40, fm.height() + 20);
+
         rect = QRectF(QPointF(0.0, 0.0), size);
     }
     bool Paint(QPainter* painter, const QRectF& rect, bool selected) override
@@ -576,13 +603,16 @@ public:
         QFont font(fontFamily, pixelSize);
         painter->setFont(font);
         painter->drawText(rect, Qt::AlignCenter, text);
+
         if (selected)
         {
             painter->setPen(QPen(QColor(0, 180, 255), 2, Qt::DashLine));
             painter->setBrush(Qt::NoBrush);
             painter->drawRoundedRect(rect, 6.0, 6.0);
         }
+
         painter->restore();
+
         return true;
     }
 
@@ -735,11 +765,10 @@ private:
     int pixelSize;
     QString fontPath;
     QString assetPath;
-    static inline const bool registered;
+
+    static const bool registered;
 
 };
-
-inline const bool ButtonComponent::registered = [](){ Component::Register("Button", [](QObject* parent){ return new ButtonComponent(parent); }); return true; }();
 
 class UiElement : public QObject
 {

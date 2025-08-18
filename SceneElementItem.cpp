@@ -3,6 +3,7 @@
 #include <QGraphicsScene>
 #include <cmath>
 #include <algorithm>
+#include "EntityComponentSystem.hpp"
 
 SceneElementItem::SceneElementItem(UiElement* element) : QGraphicsObject(nullptr), element(element), localRect(-50.0, -25.0, 100.0, 50.0)
 {

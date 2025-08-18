@@ -3,7 +3,8 @@
 
 #include <QGraphicsObject>
 #include <QPainter>
-#include "EntityComponentSystem.hpp"
+
+class UiElement;
 
 class SceneElementItem : public QGraphicsObject
 {

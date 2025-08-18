@@ -41,6 +41,7 @@ endif()
 # _directory_contents at D:/Qt/Install/6.8.1/mingw_64/lib/cmake/Qt6LinguistTools/Qt6LinguistToolsMacros.cmake:55 (file)
 file(GLOB_RECURSE NEW_GLOB LIST_DIRECTORIES false "D:/Qt/Projects/UIMaker2/*.cpp")
 set(OLD_GLOB
+  "D:/Qt/Projects/UIMaker2/EntityComponentSystem.cpp"
   "D:/Qt/Projects/UIMaker2/EntityTreeModel.cpp"
   "D:/Qt/Projects/UIMaker2/MainWindow.cpp"
   "D:/Qt/Projects/UIMaker2/PropertyEditorPanel.cpp"
