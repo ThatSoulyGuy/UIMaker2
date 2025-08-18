@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>UIMaker2</class>
+ <widget class="QMainWindow" name="UIMaker2">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1096</width>
+    <height>628</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>UIMaker2</string>
+  </property>
+  <property name="windowIcon">
+   <iconset>
+    <normaloff>C:/Users/bkmcm/Documents/Models/UIMakerIcon.png</normaloff>C:/Users/bkmcm/Documents/Models/UIMakerIcon.png</iconset>
+  </property>
+  <widget class="QWidget" name="Grid">
+   <layout class="QGridLayout" name="gridLayout">
+    <item row="0" column="0">
+     <widget class="QGraphicsView" name="graphicsView"/>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="MenuBar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1096</width>
+     <height>20</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="MenuFile">
+    <property name="title">
+     <string>File</string>
+    </property>
+    <addaction name="ActionNew"/>
+    <addaction name="ActionLoad"/>
+    <addaction name="ActionExport"/>
+   </widget>
+   <widget class="QMenu" name="MenuEdit">
+    <property name="title">
+     <string>Edit</string>
+    </property>
+    <addaction name="ActionMove"/>
+    <addaction name="ActionScale"/>
+    <addaction name="ActionRotate"/>
+    <addaction name="separator"/>
+    <addaction name="ActionUndo"/>
+    <addaction name="ActionRedo"/>
+   </widget>
+   <widget class="QMenu" name="MenuNew">
+    <property name="title">
+     <string>New</string>
+    </property>
+    <addaction name="ActionAddImage"/>
+    <addaction name="ActionAddButton"/>
+    <addaction name="ActionAddText"/>
+   </widget>
+   <addaction name="MenuFile"/>
+   <addaction name="MenuEdit"/>
+   <addaction name="MenuNew"/>
+  </widget>
+  <widget class="QDockWidget" name="ObjectHierarchy">
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="windowTitle">
+    <string>Object Hierarchy</string>
+   </property>
+   <attribute name="dockWidgetArea">
+    <number>1</number>
+   </attribute>
+   <widget class="QWidget" name="ObjectHierarchyContents"/>
+  </widget>
+  <widget class="QDockWidget" name="PropertyEditor">
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="windowTitle">
+    <string>Property Editor</string>
+   </property>
+   <attribute name="dockWidgetArea">
+    <number>2</number>
+   </attribute>
+   <widget class="QWidget" name="PropertyEditorContents"/>
+  </widget>
+  <action name="ActionNew">
+   <property name="text">
+    <string>New...</string>
+   </property>
+  </action>
+  <action name="ActionLoad">
+   <property name="text">
+    <string>Load...</string>
+   </property>
+  </action>
+  <action name="actionProperties">
+   <property name="text">
+    <string>Properties</string>
+   </property>
+  </action>
+  <action name="ActionMove">
+   <property name="text">
+    <string>Move</string>
+   </property>
+  </action>
+  <action name="ActionScale">
+   <property name="text">
+    <string>Scale...</string>
+   </property>
+  </action>
+  <action name="ActionRotate">
+   <property name="text">
+    <string>Rotate</string>
+   </property>
+  </action>
+  <action name="ActionUndo">
+   <property name="text">
+    <string>Undo</string>
+   </property>
+  </action>
+  <action name="ActionRedo">
+   <property name="text">
+    <string>Redo</string>
+   </property>
+  </action>
+  <action name="ActionAddImage">
+   <property name="text">
+    <string>Add Image...</string>
+   </property>
+  </action>
+  <action name="ActionAddButton">
+   <property name="text">
+    <string>Add Button...</string>
+   </property>
+  </action>
+  <action name="ActionAddText">
+   <property name="text">
+    <string>Add Text</string>
+   </property>
+  </action>
+  <action name="ActionExport">
+   <property name="text">
+    <string>Export</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
