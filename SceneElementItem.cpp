@@ -2,6 +2,7 @@
 #include <QFontMetrics>
 #include <QGraphicsScene>
 #include <cmath>
+#include <algorithm>
 
 SceneElementItem::SceneElementItem(UiElement* element) : QGraphicsObject(nullptr), element(element), localRect(-50.0, -25.0, 100.0, 50.0)
 {
@@ -25,88 +26,29 @@ void SceneElementItem::OnComponentChanged()
 
 void SceneElementItem::RefreshFromComponents()
 {
-    auto* xform = element->GetComponent<TransformComponent>();
+    for (auto* comp : element->GetComponents())
+        QObject::connect(comp, &Component::ComponentChanged, this, &SceneElementItem::OnComponentChanged, Qt::UniqueConnection);
 
-    if (xform == nullptr)
-        xform = element->AddComponent<TransformComponent>();
-
-    QRectF newRect = localRect;
-    QPixmap newPixmap;
-
-    if (auto* img = element->GetComponent<ImageComponent>())
-    {
-        if (!img->GetImagePath().isEmpty())
-        {
-            QPixmap loaded(img->GetImagePath());
-            if (!loaded.isNull())
-            {
-                newPixmap = loaded;
-                newRect = QRectF(QPointF(0.0, 0.0), loaded.size());
-            }
-        }
-    }
-    else if (auto* text = element->GetComponent<TextComponent>())
-    {
-        QFont font(text->GetFontFamily(), text->GetPixelSize());
-        QFontMetrics fontMetrics(font);
-
-        const QSize size(fontMetrics.horizontalAdvance(text->GetText()), fontMetrics.height());
-
-        newRect = QRectF(QPointF(0.0, 0.0), size);
-    }
-    else if (auto* button = element->GetComponent<ButtonComponent>())
-    {
-        QFont font(button->GetFontFamily(), button->GetPixelSize());
-        QFontMetrics fm(font);
-
-        const QSize size(fm.horizontalAdvance(button->GetText()) + 40, fm.height() + 20);
-
-        newRect = QRectF(QPointF(0.0, 0.0), size);
-    }
-    else
-        newRect = QRectF(0.0, 0.0, 100.0, 50.0);
+    if (!element->GetComponent<TransformComponent>())
+        element->AddComponent<TransformComponent>();
 
     QRectF parentRect;
-
     if (auto* p = parentItem())
         parentRect = p->boundingRect();
     else if (scene())
         parentRect = scene()->sceneRect();
 
-    QPointF pos = xform->GetPosition();
-    auto stretch = xform->GetStretch();
-
-    if (stretch.testFlag(Anchor::LEFT) && stretch.testFlag(Anchor::RIGHT))
-        newRect.setWidth(parentRect.width() - pos.x() * 2.0);
-    if (stretch.testFlag(Anchor::TOP) && stretch.testFlag(Anchor::BOTTOM))
-        newRect.setHeight(parentRect.height() - pos.y() * 2.0);
+    QRectF newRect(0.0, 0.0, 100.0, 50.0);
+    auto comps = element->GetComponents();
+    std::sort(comps.begin(), comps.end(), [](Component* a, Component* b){ return a->UpdateOrder() < b->UpdateOrder(); });
+    for (auto* comp : comps)
+        comp->Update(*this, newRect, parentRect);
 
     if (newRect != localRect)
     {
         prepareGeometryChange();
         localRect = newRect;
     }
-
-    pixmap = newPixmap;
-
-    auto anchors = xform->GetAnchors();
-
-    double x = pos.x();
-    double y = pos.y();
-
-    if (anchors.testFlag(Anchor::RIGHT))
-        x = parentRect.width() - localRect.width() - pos.x();
-    else if (anchors.testFlag(Anchor::CENTER_X))
-        x = (parentRect.width() - localRect.width()) * 0.5 + pos.x();
-
-    if (anchors.testFlag(Anchor::BOTTOM))
-        y = parentRect.height() - localRect.height() - pos.y();
-    else if (anchors.testFlag(Anchor::CENTER_Y))
-        y = (parentRect.height() - localRect.height()) * 0.5 + pos.y();
-
-    setPos(parentRect.topLeft() + QPointF(x, y));
-    setRotation(xform->GetRotationDegrees());
-    setScale(std::max(0.0001, xform->GetScale().x()));
 }
 
 
@@ -159,78 +101,23 @@ QVariant SceneElementItem::itemChange(GraphicsItemChange change, const QVariant&
 void SceneElementItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*)
 {
     painter->save();
+    bool painted = false;
+    auto comps = element->GetComponents();
+    std::sort(comps.begin(), comps.end(), [](Component* a, Component* b){ return a->UpdateOrder() < b->UpdateOrder(); });
+    for (auto* comp : comps)
+        painted |= comp->Paint(painter, localRect, isSelected());
 
-    if (!pixmap.isNull())
+    if (!painted)
     {
-        painter->setOpacity(1.0);
-        painter->drawPixmap(localRect.topLeft(), pixmap);
-
-        if (isSelected())
-        {
-            painter->setPen(QPen(QColor(0, 180, 255), 2, Qt::DashLine));
-            painter->setBrush(Qt::NoBrush);
-            painter->drawRect(localRect);
-        }
-
-        painter->restore();
-
-        return;
-    }
-
-    if (auto* text = element->GetComponent<TextComponent>())
-    {
-        QFont font(text->GetFontFamily(), text->GetPixelSize());
-
-        painter->setFont(font);
-        painter->setPen(text->GetColor());
-
-        painter->drawText(localRect.topLeft() + QPointF(0.0, localRect.height() - 4.0), text->GetText());
-
-        if (isSelected())
-        {
-            painter->setPen(QPen(QColor(0, 180, 255), 2, Qt::DashLine));
-            painter->setBrush(Qt::NoBrush);
-            painter->drawRect(localRect);
-        }
-
-        painter->restore();
-
-        return;
-    }
-
-    if (auto* button = element->GetComponent<ButtonComponent>())
-    {
-        painter->setRenderHint(QPainter::Antialiasing, true);
+        painter->setBrush(QColor(80, 80, 80));
         painter->setPen(Qt::NoPen);
-        painter->setBrush(button->GetBackgroundColor());
-        painter->drawRoundedRect(localRect, 6.0, 6.0);
-        painter->setPen(button->GetTextColor());
-        QFont font(button->GetFontFamily(), button->GetPixelSize());
-        painter->setFont(font);
-        painter->drawText(localRect, Qt::AlignCenter, button->GetText());
-
+        painter->drawRect(localRect);
         if (isSelected())
         {
             painter->setPen(QPen(QColor(0, 180, 255), 2, Qt::DashLine));
             painter->setBrush(Qt::NoBrush);
-            painter->drawRoundedRect(localRect, 6.0, 6.0);
+            painter->drawRect(localRect);
         }
-
-        painter->restore();
-
-        return;
     }
-
-    painter->setBrush(QColor(80, 80, 80));
-    painter->setPen(Qt::NoPen);
-    painter->drawRect(localRect);
-
-    if (isSelected())
-    {
-        painter->setPen(QPen(QColor(0, 180, 255), 2, Qt::DashLine));
-        painter->setBrush(Qt::NoBrush);
-        painter->drawRect(localRect);
-    }
-
     painter->restore();
 }

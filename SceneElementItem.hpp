@@ -2,7 +2,6 @@
 #define SCENEELEMENTITEM_HPP
 
 #include <QGraphicsObject>
-#include <QPixmap>
 #include <QPainter>
 #include "EntityComponentSystem.hpp"
 
@@ -40,7 +39,6 @@ private:
 
     UiElement* element;
     QRectF localRect;
-    QPixmap pixmap;
 };
 
 #endif

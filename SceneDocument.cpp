@@ -184,17 +184,7 @@ bool SceneDocument::LoadJson(const QByteArray& data)
     {
         QJsonObject c = v.toObject();
         QString kind = c["kind"].toString();
-        Component* comp = nullptr;
-        if (kind == "Transform")
-            comp = root->AddComponent<TransformComponent>();
-        else if (kind == "Image")
-            comp = root->AddComponent<ImageComponent>();
-        else if (kind == "Text")
-            comp = root->AddComponent<TextComponent>();
-        else if (kind == "Button")
-            comp = root->AddComponent<ButtonComponent>();
-
-        if (comp)
+        if (auto* comp = Component::Create(kind, root))
             comp->FromJson(c);
     }
 
@@ -230,19 +220,7 @@ UiElement* SceneDocument::CreateElementFromJson(const QJsonObject& obj, UiElemen
     {
         QJsonObject c = v.toObject();
         QString kind = c["kind"].toString();
-
-        Component* comp = nullptr;
-
-        if (kind == "Transform")
-            comp = e->AddComponent<TransformComponent>();
-        else if (kind == "Image")
-            comp = e->AddComponent<ImageComponent>();
-        else if (kind == "Text")
-            comp = e->AddComponent<TextComponent>();
-        else if (kind == "Button")
-            comp = e->AddComponent<ButtonComponent>();
-
-        if (comp)
+        if (auto* comp = Component::Create(kind, e))
             comp->FromJson(c);
     }
 
