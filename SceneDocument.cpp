@@ -9,6 +9,12 @@ SceneElementItem* SceneDocument::CreateItemFor(UiElement* e)
 {
     auto* item = new SceneElementItem(e);
 
+    if (auto* parentElement = qobject_cast<UiElement*>(e->parent()))
+    {
+        if (items.contains(parentElement))
+            item->setParentItem(items.value(parentElement));
+    }
+
     scene->addItem(item);
     items.insert(e, item);
 

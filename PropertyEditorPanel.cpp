@@ -32,6 +32,9 @@ void PropertyEditorPanel::SetTarget(UiElement* element)
 
 void PropertyEditorPanel::OnComponentChanged()
 {
+    if (suppressRebuild)
+        return;
+
     Rebuild();
 }
 
@@ -40,7 +43,18 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
     const QString name = QString::fromLatin1(prop.name());
     const auto type = prop.metaType();
 
-    if (type == QMetaType::fromType<double>())
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    auto isType = [&](auto t) { return prop.metaType() == QMetaType::fromType<decltype(t)>(); };
+#else
+    auto isType = [&](int meta) { return prop.type() == meta; };
+#endif
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    if (isType(double{}))
+#else
+    if (isType(QMetaType::Double))
+#endif
     {
         auto* box = new QDoubleSpinBox();
 
@@ -48,42 +62,70 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         box->setDecimals(3);
         box->setValue(object->property(prop.name()).toDouble());
 
-        QObject::connect(box, &QDoubleSpinBox::valueChanged, object, [object, prop](double v)
+        QObject::connect(box, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, object, prop](double v)
         {
+            suppressRebuild = true;
             object->setProperty(prop.name(), v);
+            suppressRebuild = false;
+            emit PropertyEdited();
         });
+
 
         return box;
     }
 
-    if (type == QMetaType::fromType<int>())
+    if (
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        isType(int{})
+#else
+        isType(QMetaType::Int)
+#endif
+        )
     {
         auto* box = new QSpinBox();
 
         box->setRange(0, 4096);
         box->setValue(object->property(prop.name()).toInt());
 
-        QObject::connect(box, &QSpinBox::valueChanged, object, [object, prop](int v)
+        QObject::connect(box, qOverload<int>(&QSpinBox::valueChanged), this, [this, object, prop](int v)
         {
+            suppressRebuild = true;
             object->setProperty(prop.name(), v);
+            suppressRebuild = false;
+            emit PropertyEdited();
         });
 
         return box;
     }
 
-    if (type == QMetaType::fromType<QString>())
+    if (
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        isType(QString{})
+#else
+        isType(QMetaType::QString)
+#endif
+        )
     {
         auto* edit = new QLineEdit(object->property(prop.name()).toString());
 
-        QObject::connect(edit, &QLineEdit::textEdited, object, [object, prop](const QString& v)
+        QObject::connect(edit, &QLineEdit::textEdited, this, [this, object, prop](const QString& v)
         {
+            suppressRebuild = true;
             object->setProperty(prop.name(), v);
+            suppressRebuild = false;
+            emit PropertyEdited();
         });
 
         return edit;
     }
 
-    if (type == QMetaType::fromType<QPointF>())
+    if (
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        isType(QPointF{})
+#else
+        isType(QMetaType::QPointF)
+#endif
+        )
     {
         auto* row = new QWidget();
 
@@ -103,14 +145,20 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         x->setValue(p.x());
         y->setValue(p.y());
 
-        QObject::connect(x, &QDoubleSpinBox::valueChanged, object, [object, prop, y](double xv)
+        QObject::connect(x, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, object, prop, y](double xv)
         {
+            suppressRebuild = true;
             object->setProperty(prop.name(), QPointF(xv, y->value()));
+            suppressRebuild = false;
+            emit PropertyEdited();
         });
 
-        QObject::connect(y, &QDoubleSpinBox::valueChanged, object, [object, prop, x](double yv)
+        QObject::connect(y, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, object, prop, x](double yv)
         {
+            suppressRebuild = true;
             object->setProperty(prop.name(), QPointF(x->value(), yv));
+            suppressRebuild = false;
+            emit PropertyEdited();
         });
 
         h->addWidget(x);
@@ -120,7 +168,13 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         return row;
     }
 
-    if (type == QMetaType::fromType<QColor>())
+    if (
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        isType(QColor{})
+#else
+        isType(QMetaType::QColor)
+#endif
+        )
     {
         auto* button = new QPushButton(object->property(prop.name()).value<QColor>().name(QColor::HexArgb));
 
@@ -149,19 +203,26 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
 
         auto* edit = new QLineEdit(object->property(prop.name()).toString());
         auto* browse = new QPushButton("...");
-        QObject::connect(edit, &QLineEdit::textEdited, object, [object, prop](const QString& v)
+
+        QObject::connect(edit, &QLineEdit::textEdited, this, [this, object, prop](const QString& v)
         {
+            suppressRebuild = true;
             object->setProperty(prop.name(), v);
+            suppressRebuild = false;
+            emit PropertyEdited();
         });
 
-        QObject::connect(browse, &QPushButton::clicked, this, [edit, object, prop]()
+        QObject::connect(browse, &QPushButton::clicked, this, [this, edit, object, prop]()
         {
             auto path = QFileDialog::getOpenFileName(nullptr, "Choose Image", QString(), "Images (*.png *.jpg *.jpeg *.bmp)");
 
             if (!path.isEmpty())
             {
                 edit->setText(path);
+                suppressRebuild = true;
                 object->setProperty(prop.name(), path);
+                suppressRebuild = false;
+                emit PropertyEdited();
             }
         });
 
@@ -245,7 +306,7 @@ void PropertyEditorPanel::Rebuild()
         group->setLayout(form);
         layout->addWidget(group);
 
-        QObject::connect(comp, &Component::ComponentChanged, this, &PropertyEditorPanel::OnComponentChanged);
+        QObject::connect(comp, &Component::ComponentChanged, this, &PropertyEditorPanel::OnComponentChanged, Qt::UniqueConnection);
     }
 
     layout->addStretch(1);

@@ -43,6 +43,8 @@ private:
     QScrollArea* scrollArea;
     QWidget* container;
     QVBoxLayout* layout;
+
+    bool suppressRebuild = false;
 };
 
 #endif
