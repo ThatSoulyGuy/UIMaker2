@@ -460,25 +460,7 @@ void PropertyEditorPanel::Rebuild()
 
     for (auto* comp : target->GetComponents())
     {
-        auto* group = new QGroupBox(QString("%1").arg([&]()
-        {
-            switch (comp->GetKind())
-            {
-                case ComponentKind::TRANSFORM:
-                    return "Transform";
-
-                case ComponentKind::IMAGE:
-                    return "Image";
-
-                case ComponentKind::TEXT:
-                    return "Text";
-
-                case ComponentKind::BUTTON:
-                    return "Button";
-            }
-
-            return "Component";
-        }()));
+        auto* group = new QGroupBox(comp->GetTypeName());
 
         auto* form = new QFormLayout();
 
