@@ -33,9 +33,28 @@ public:
 
     virtual ~Component() = default;
     virtual QString GetTypeName() const = 0;
-    virtual int UpdateOrder() const { return 0; }
-    virtual void Update(class SceneElementItem& item, QRectF& rect, const QRectF& parentRect) { Q_UNUSED(item); Q_UNUSED(rect); Q_UNUSED(parentRect); }
-    virtual bool Paint(QPainter* painter, const QRectF& rect, bool selected) { Q_UNUSED(painter); Q_UNUSED(rect); Q_UNUSED(selected); return false; }
+
+    virtual int UpdateOrder() const
+    {
+        return 0;
+    }
+
+    virtual void Update(class SceneElementItem& item, QRectF& rect, const QRectF& parentRect)
+    {
+        Q_UNUSED(item);
+        Q_UNUSED(rect);
+        Q_UNUSED(parentRect);
+    }
+
+    virtual bool Paint(QPainter* painter, const QRectF& rect, bool selected)
+    {
+        Q_UNUSED(painter);
+        Q_UNUSED(rect);
+        Q_UNUSED(selected);
+
+        return false;
+    }
+
     virtual void ToJson(QJsonObject& out) const = 0;
     virtual void FromJson(const QJsonObject& in) = 0;
 
@@ -43,6 +62,7 @@ public:
     static QHash<QString, ComponentFactory>& Registry()
     {
         static QHash<QString, ComponentFactory> registry;
+
         return registry;
     }
 
@@ -55,6 +75,20 @@ public:
     {
         auto it = Registry().find(name);
         return it != Registry().end() ? it.value()(parent) : nullptr;
+    }
+
+public slots:
+
+    void EmitComponentChanged()
+    {
+        emit ComponentChanged();
+    }
+
+protected:
+
+    void NotifyChanged()
+    {
+        QMetaObject::invokeMethod(this, "EmitComponentChanged", Qt::QueuedConnection);
     }
 
 signals:
@@ -107,8 +141,10 @@ public:
     {
         Q_UNUSED(item);
         QPointF pos = position;
+
         if (stretch.testFlag(Anchor::LEFT) && stretch.testFlag(Anchor::RIGHT))
             rect.setWidth(parentRect.width() - pos.x() * 2.0);
+
         if (stretch.testFlag(Anchor::TOP) && stretch.testFlag(Anchor::BOTTOM))
             rect.setHeight(parentRect.height() - pos.y() * 2.0);
 
@@ -142,7 +178,7 @@ public:
 
         position = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     double GetRotationDegrees() const noexcept
@@ -157,7 +193,7 @@ public:
 
         rotationDegrees = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     QPointF GetScale() const noexcept
@@ -172,7 +208,7 @@ public:
 
         scale = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     AnchorFlags GetAnchors() const noexcept
@@ -199,7 +235,7 @@ public:
 
         anchors = sanitized;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     AnchorFlags GetStretch() const noexcept
@@ -214,9 +250,8 @@ public:
 
         stretch = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
-
 
     void ToJson(QJsonObject& out) const override
     {
@@ -320,7 +355,7 @@ public:
 
         imagePath = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     QString GetAssetPath() const noexcept
@@ -335,7 +370,7 @@ public:
 
         assetPath = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     QColor GetTint() const noexcept
@@ -350,7 +385,7 @@ public:
 
         tint = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     void ToJson(QJsonObject& out) const override
@@ -405,13 +440,19 @@ public:
 
         rect = QRectF(QPointF(0.0, 0.0), size);
     }
+
     bool Paint(QPainter* painter, const QRectF& rect, bool selected) override
     {
         painter->save();
+
         QFont font(fontFamily, pixelSize);
+
         painter->setFont(font);
         painter->setPen(color);
-        painter->drawText(rect.topLeft() + QPointF(0.0, rect.height() - 4.0), text);
+
+        const QString s = text;
+
+        painter->drawText(rect.topLeft() + QPointF(0.0, rect.height() - 4.0), s);
 
         if (selected)
         {
@@ -425,6 +466,7 @@ public:
         return true;
     }
 
+
     QString GetText() const noexcept
     {
         return text;
@@ -437,7 +479,7 @@ public:
 
         text = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     QString GetFontFamily() const noexcept
@@ -452,7 +494,7 @@ public:
 
         fontFamily = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     int GetPixelSize() const noexcept
@@ -467,7 +509,7 @@ public:
 
         pixelSize = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     QColor GetColor() const noexcept
@@ -482,7 +524,7 @@ public:
 
         color = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     QString GetFontPath() const noexcept
@@ -509,7 +551,7 @@ public:
             }
         }
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     QString GetAssetPath() const noexcept
@@ -524,7 +566,7 @@ public:
 
         assetPath = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
     
     void ToJson(QJsonObject& out) const override
@@ -628,7 +670,7 @@ public:
 
         text = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     QColor GetBackgroundColor() const noexcept
@@ -643,7 +685,7 @@ public:
 
         backgroundColor = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     QColor GetTextColor() const noexcept
@@ -658,7 +700,7 @@ public:
 
         textColor = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     QString GetFontFamily() const noexcept
@@ -673,7 +715,7 @@ public:
 
         fontFamily = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     int GetPixelSize() const noexcept
@@ -688,7 +730,7 @@ public:
 
         pixelSize = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     QString GetFontPath() const noexcept
@@ -715,7 +757,7 @@ public:
             }
         }
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     QString GetAssetPath() const noexcept
@@ -730,7 +772,7 @@ public:
 
         assetPath = v;
 
-        emit ComponentChanged();
+        NotifyChanged();
     }
 
     void ToJson(QJsonObject& out) const override

@@ -40,6 +40,7 @@ private:
 
     UiElement* element;
     QRectF localRect;
+    bool pendingRefresh = false;
 };
 
 #endif

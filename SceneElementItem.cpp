@@ -12,7 +12,7 @@ SceneElementItem::SceneElementItem(UiElement* element) : QGraphicsObject(nullptr
     setFlag(QGraphicsItem::ItemSendsGeometryChanges, true);
 
     for (auto* comp : element->GetComponents())
-        QObject::connect(comp, &Component::ComponentChanged, this, &SceneElementItem::OnComponentChanged);
+        QObject::connect(comp, &Component::ComponentChanged, this, &SceneElementItem::OnComponentChanged, Qt::UniqueConnection);
 
     QObject::connect(element, &UiElement::ComponentListChanged, this, &SceneElementItem::RefreshFromComponents);
 
@@ -21,8 +21,12 @@ SceneElementItem::SceneElementItem(UiElement* element) : QGraphicsObject(nullptr
 
 void SceneElementItem::OnComponentChanged()
 {
-    RefreshFromComponents();
-    update();
+    if (pendingRefresh)
+        return;
+
+    pendingRefresh = true;
+
+    QMetaObject::invokeMethod(this, [this](){ RefreshFromComponents(); update(); pendingRefresh = false; }, Qt::QueuedConnection);
 }
 
 void SceneElementItem::RefreshFromComponents()
@@ -34,6 +38,7 @@ void SceneElementItem::RefreshFromComponents()
         element->AddComponent<TransformComponent>();
 
     QRectF parentRect;
+
     if (auto* p = parentItem())
         parentRect = p->boundingRect();
     else if (scene())

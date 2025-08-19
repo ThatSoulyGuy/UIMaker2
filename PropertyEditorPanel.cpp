@@ -4,6 +4,8 @@
 #include <QCheckBox>
 #include <QHBoxLayout>
 #include <QComboBox>
+#include <QPointer>
+#include <QTimer>
 
 PropertyEditorPanel::PropertyEditorPanel(QWidget* parent) : QWidget(parent), target(nullptr)
 {
@@ -29,16 +31,32 @@ PropertyEditorPanel::PropertyEditorPanel(QWidget* parent) : QWidget(parent), tar
 
 void PropertyEditorPanel::SetTarget(UiElement* element)
 {
+    if (target)
+    {
+        QObject::disconnect(target, nullptr, this, nullptr);
+
+        for (Component* comp : target->GetComponents())
+            QObject::disconnect(comp, nullptr, this, nullptr);
+    }
+
     target = element;
+
+    if (target)
+    {
+        QObject::connect(target, &UiElement::ComponentListChanged, this, [this](UiElement*)
+        {
+            Rebuild();
+        });
+    }
+
     Rebuild();
 }
-
 void PropertyEditorPanel::OnComponentChanged()
 {
     if (suppressRebuild)
         return;
 
-    Rebuild();
+    QTimer::singleShot(0, this, [this](){ Rebuild(); });
 }
 
 QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProperty& prop)
@@ -64,14 +82,17 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         box->setDecimals(3);
         box->setValue(object->property(prop.name()).toDouble());
 
-        QObject::connect(box, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, object, prop](double v)
+
+        QPointer<QObject> obj = object;
+        QObject::connect(box, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, obj, prop](double v)
         {
+            if (!obj)
+                return;
             suppressRebuild = true;
-            object->setProperty(prop.name(), v);
+            obj->setProperty(prop.name(), v);
             suppressRebuild = false;
             emit PropertyEdited();
         });
-
 
         return box;
     }
@@ -89,11 +110,17 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         box->setRange(0, 4096);
         box->setValue(object->property(prop.name()).toInt());
 
-        QObject::connect(box, qOverload<int>(&QSpinBox::valueChanged), this, [this, object, prop](int v)
+        QPointer<QObject> obj = object;
+
+        QObject::connect(box, qOverload<int>(&QSpinBox::valueChanged), this, [this, obj, prop](int v)
         {
+            if (!obj)
+                return;
+
             suppressRebuild = true;
-            object->setProperty(prop.name(), v);
+            obj->setProperty(prop.name(), v);
             suppressRebuild = false;
+
             emit PropertyEdited();
         });
 
@@ -110,10 +137,14 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
     {
         auto* edit = new QLineEdit(object->property(prop.name()).toString());
 
-        QObject::connect(edit, &QLineEdit::textEdited, this, [this, object, prop](const QString& v)
+        QPointer<QObject> obj = object;
+
+        QObject::connect(edit, &QLineEdit::textEdited, this, [this, obj, prop](const QString& v)
         {
+            if (!obj)
+                return;
             suppressRebuild = true;
-            object->setProperty(prop.name(), v);
+            obj->setProperty(prop.name(), v);
             suppressRebuild = false;
             emit PropertyEdited();
         });
@@ -165,11 +196,14 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
 
         comboV->setCurrentIndex(selV);
 
-        QObject::connect(comboH, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, object, prop, comboV](int index)
+        QPointer<QObject> obj = object;
+        QObject::connect(comboH, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, obj, prop, comboV](int index)
         {
+            if (!obj)
+                return;
             suppressRebuild = true;
 
-            int v = object->property(prop.name()).toInt();
+            int v = obj->property(prop.name()).toInt();
 
             v &= ~(static_cast<int>(Anchor::LEFT) | static_cast<int>(Anchor::RIGHT) | static_cast<int>(Anchor::CENTER_X));
 
@@ -180,16 +214,18 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             else if (index == 2)
                 v |= static_cast<int>(Anchor::RIGHT);
 
-            object->setProperty(prop.name(), v);
+            obj->setProperty(prop.name(), v);
             suppressRebuild = false;
             emit PropertyEdited();
         });
 
-        QObject::connect(comboV, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, object, prop, comboH](int index)
+        QObject::connect(comboV, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, obj, prop, comboH](int index)
         {
+            if (!obj)
+                return;
             suppressRebuild = true;
 
-            int v = object->property(prop.name()).toInt();
+            int v = obj->property(prop.name()).toInt();
 
             v &= ~(static_cast<int>(Anchor::TOP) | static_cast<int>(Anchor::BOTTOM) | static_cast<int>(Anchor::CENTER_Y));
 
@@ -200,7 +236,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             else if (index == 2)
                 v |= static_cast<int>(Anchor::BOTTOM);
 
-            object->setProperty(prop.name(), v);
+            obj->setProperty(prop.name(), v);
             suppressRebuild = false;
             emit PropertyEdited();
         });
@@ -243,24 +279,31 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
 
         combo->setCurrentIndex(sel);
 
-        QObject::connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, object, prop](int index)
+        QPointer<QObject> obj = object;
+        QObject::connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, obj, prop](int index)
         {
+            if (!obj)
+                return;
+
             suppressRebuild = true;
 
             int v = 0;
+
             if (index == 1 || index == 3)
             {
                 v |= static_cast<int>(Anchor::LEFT);
                 v |= static_cast<int>(Anchor::RIGHT);
             }
+
             if (index == 2 || index == 3)
             {
                 v |= static_cast<int>(Anchor::TOP);
                 v |= static_cast<int>(Anchor::BOTTOM);
             }
 
-            object->setProperty(prop.name(), v);
+            obj->setProperty(prop.name(), v);
             suppressRebuild = false;
+
             emit PropertyEdited();
         });
 
@@ -287,18 +330,22 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             auto* cb = new QCheckBox(QString::fromLatin1(e.key(i)));
             cb->setChecked(curr & value);
 
-            QObject::connect(cb, &QCheckBox::toggled, this, [this, object, prop, value](bool checked)
+            QPointer<QObject> obj = object;
+
+            QObject::connect(cb, &QCheckBox::toggled, this, [this, obj, prop, value](bool checked)
             {
+                if (!obj)
+                    return;
                 suppressRebuild = true;
 
-                int v = object->property(prop.name()).toInt();
+                int v = obj->property(prop.name()).toInt();
 
                 if (checked)
                     v |= value;
                 else
                     v &= ~value;
 
-                object->setProperty(prop.name(), v);
+                obj->setProperty(prop.name(), v);
                 suppressRebuild = false;
 
                 emit PropertyEdited();
@@ -333,23 +380,32 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         y->setDecimals(3);
 
         auto p = object->property(prop.name()).toPointF();
-
         x->setValue(p.x());
         y->setValue(p.y());
 
-        QObject::connect(x, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, object, prop, y](double xv)
+        QPointer<QObject> obj = object;
+
+        QObject::connect(x, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, obj, prop, y](double xv)
         {
+            if (!obj)
+                return;
+
             suppressRebuild = true;
-            object->setProperty(prop.name(), QPointF(xv, y->value()));
+            obj->setProperty(prop.name(), QPointF(xv, y->value()));
             suppressRebuild = false;
+
             emit PropertyEdited();
         });
 
-        QObject::connect(y, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, object, prop, x](double yv)
+        QObject::connect(y, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, obj, prop, x](double yv)
         {
+            if (!obj)
+                return;
+
             suppressRebuild = true;
-            object->setProperty(prop.name(), QPointF(x->value(), yv));
+            obj->setProperty(prop.name(), QPointF(x->value(), yv));
             suppressRebuild = false;
+
             emit PropertyEdited();
         });
 
@@ -370,16 +426,28 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
     {
         auto* button = new QPushButton(object->property(prop.name()).value<QColor>().name(QColor::HexArgb));
 
-        QObject::connect(button, &QPushButton::clicked, this, [object, prop, button]()
+        QPointer<QObject> obj = object;
+        QPointer<QPushButton> btn = button;
+
+        QObject::connect(button, &QPushButton::clicked, this, [this, obj, prop, btn]()
         {
-            QColor c = QColorDialog::getColor(object->property(prop.name()).value<QColor>());
+            if (!obj || !btn)
+                return;
+
+            suppressRebuild = true;
+            QColor c = QColorDialog::getColor(obj->property(prop.name()).value<QColor>());
 
             if (c.isValid())
             {
-                object->setProperty(prop.name(), c);
+                obj->setProperty(prop.name(), c);
 
-                button->setText(c.name(QColor::HexArgb));
+                if (btn)
+                    btn->setText(c.name(QColor::HexArgb));
             }
+
+            suppressRebuild = false;
+
+            emit PropertyEdited();
         });
 
         return button;
@@ -396,25 +464,33 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         auto* edit = new QLineEdit(object->property(prop.name()).toString());
         auto* browse = new QPushButton("...");
 
-        QObject::connect(edit, &QLineEdit::textEdited, this, [this, object, prop](const QString& v)
+        QPointer<QObject> obj = object;
+
+        QObject::connect(edit, &QLineEdit::textEdited, this, [this, obj, prop](const QString& v)
         {
+            if (!obj)
+                return;
+
             suppressRebuild = true;
-            object->setProperty(prop.name(), v);
+            obj->setProperty(prop.name(), v);
             suppressRebuild = false;
+
             emit PropertyEdited();
         });
 
-        QObject::connect(browse, &QPushButton::clicked, this, [this, edit, object, prop, name]()
+        QObject::connect(browse, &QPushButton::clicked, this, [this, edit, obj, prop, name]()
         {
             QString filter = name == "imagePath" ? "Images (*.png *.jpg *.jpeg *.bmp)" : "Fonts (*.ttf *.otf)";
             auto path = QFileDialog::getOpenFileName(nullptr, name == "imagePath" ? "Choose Image" : "Choose Font", QString(), filter);
 
-            if (!path.isEmpty())
+            if (!path.isEmpty() && obj)
             {
                 edit->setText(path);
+
                 suppressRebuild = true;
-                object->setProperty(prop.name(), path);
+                obj->setProperty(prop.name(), path);
                 suppressRebuild = false;
+
                 emit PropertyEdited();
             }
         });
