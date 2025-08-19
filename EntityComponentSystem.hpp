@@ -137,16 +137,18 @@ public:
         return 1;
     }
 
-    void Update(class SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override
+    void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override
     {
         Q_UNUSED(item);
         QPointF pos = position;
 
         if (stretch.testFlag(Anchor::LEFT) && stretch.testFlag(Anchor::RIGHT))
             rect.setWidth(parentRect.width() - pos.x() * 2.0);
-
         if (stretch.testFlag(Anchor::TOP) && stretch.testFlag(Anchor::BOTTOM))
             rect.setHeight(parentRect.height() - pos.y() * 2.0);
+
+        rect.setWidth(std::max(0.0001, rect.width() * scale.x()));
+        rect.setHeight(std::max(0.0001, rect.height() * scale.y()));
 
         double x = pos.x();
         double y = pos.y();
@@ -161,10 +163,10 @@ public:
         else if (anchors.testFlag(Anchor::CENTER_Y))
             y = (parentRect.height() - rect.height()) * 0.5 + pos.y();
 
-        item.setPos(parentRect.topLeft() + QPointF(x, y));
-        item.setRotation(rotationDegrees);
-        item.setScale(std::max(0.0001, scale.x()));
+        item.setPosFromComponent(parentRect.topLeft() + QPointF(x, y));
+        item.setRotationFromComponent(rotationDegrees);
     }
+
 
     QPointF GetPosition() const noexcept
     {
@@ -261,16 +263,25 @@ public:
         out["rotationDegrees"] = rotationDegrees;
         out["scaleX"] = scale.x();
         out["scaleY"] = scale.y();
+        out["anchors"] = static_cast<int>(anchors);
+        out["stretch"] = static_cast<int>(stretch);
     }
 
     void FromJson(const QJsonObject& in) override
     {
-        SetPosition(QPointF(in["x"].toDouble(0.0), in["y"].toDouble(0.0)));
+        double x = in["x"].toDouble(0.0);
+        double y = in["y"].toDouble(0.0);
+
+        auto sane = [](double v){ return std::isfinite(v) && std::abs(v) < 1e7 ? v : 0.0; };
+
+        SetPosition(QPointF(sane(x), sane(y)));
+
         SetRotationDegrees(in["rotationDegrees"].toDouble(0.0));
         SetScale(QPointF(in["scaleX"].toDouble(1.0), in["scaleY"].toDouble(1.0)));
         SetAnchors(static_cast<AnchorFlags>(in["anchors"].toInt(static_cast<int>((int)Anchor::LEFT | (int)Anchor::TOP))));
         SetStretch(static_cast<AnchorFlags>(in["stretch"].toInt(0)));
     }
+
 
 private:
 
@@ -322,6 +333,7 @@ public:
             }
         }
     }
+
     bool Paint(QPainter* painter, const QRectF& rect, bool selected) override
     {
         if (pixmap.isNull())
@@ -329,7 +341,8 @@ public:
 
         painter->save();
         painter->setOpacity(1.0);
-        painter->drawPixmap(rect.topLeft(), pixmap);
+        painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+        painter->drawPixmap(rect, pixmap, QRectF(QPointF(0.0, 0.0), QSizeF(pixmap.width(), pixmap.height())));
 
         if (selected)
         {
@@ -446,13 +459,13 @@ public:
         painter->save();
 
         QFont font(fontFamily, pixelSize);
-
         painter->setFont(font);
         painter->setPen(color);
 
-        const QString s = text;
+        QFontMetrics fm(font);
 
-        painter->drawText(rect.topLeft() + QPointF(0.0, rect.height() - 4.0), s);
+        const QPointF drawPos = rect.topLeft() + QPointF(0.0, rect.height() - fm.descent());
+        painter->drawText(drawPos, text);
 
         if (selected)
         {
@@ -465,7 +478,6 @@ public:
 
         return true;
     }
-
 
     QString GetText() const noexcept
     {

@@ -58,51 +58,69 @@ void SceneElementItem::RefreshFromComponents()
 }
 
 
+void SceneElementItem::setPosFromComponent(const QPointF& p)
+{
+    ignorePositionFeedback = true;
+    setPos(p);
+    ignorePositionFeedback = false;
+}
+
+void SceneElementItem::setRotationFromComponent(double deg)
+{
+    ignoreRotationFeedback = true;
+    setRotation(deg);
+    ignoreRotationFeedback = false;
+}
+
 QVariant SceneElementItem::itemChange(GraphicsItemChange change, const QVariant& value)
 {
     if (change == ItemPositionHasChanged)
     {
-        if (auto* xform = element->GetComponent<TransformComponent>())
+        if (!ignorePositionFeedback)
         {
-            QRectF parentRect;
+            if (auto* xform = element->GetComponent<TransformComponent>()) {
+                QRectF parentRect;
 
-            if (auto* p = parentItem())
-                parentRect = p->boundingRect();
-            else if (scene())
-                parentRect = scene()->sceneRect();
+                if (auto* p = parentItem())
+                    parentRect = p->boundingRect();
+                else if (scene())
+                    parentRect = scene()->sceneRect();
 
-            auto anchors = xform->GetAnchors();
-            QPointF p = pos() - parentRect.topLeft();
+                auto anchors = xform->GetAnchors();
+                QPointF p = pos() - parentRect.topLeft();
 
-            if (anchors.testFlag(Anchor::RIGHT))
-                p.setX(parentRect.width() - localRect.width() - p.x());
-            else if (anchors.testFlag(Anchor::CENTER_X))
-                p.setX(p.x() - (parentRect.width() - localRect.width()) * 0.5);
+                if (anchors.testFlag(Anchor::RIGHT))
+                    p.setX(parentRect.width() - localRect.width() - p.x());
+                else if (anchors.testFlag(Anchor::CENTER_X))
+                    p.setX(p.x() - (parentRect.width() - localRect.width()) * 0.5);
 
-            if (anchors.testFlag(Anchor::BOTTOM))
-                p.setY(parentRect.height() - localRect.height() - p.y());
-            else if (anchors.testFlag(Anchor::CENTER_Y))
-                p.setY(p.y() - (parentRect.height() - localRect.height()) * 0.5);
+                if (anchors.testFlag(Anchor::BOTTOM))
+                    p.setY(parentRect.height() - localRect.height() - p.y());
+                else if (anchors.testFlag(Anchor::CENTER_Y))
+                    p.setY(p.y() - (parentRect.height() - localRect.height()) * 0.5);
 
-            xform->SetPosition(p);
+                xform->SetPosition(p);
+            }
         }
     }
 
     if (change == ItemRotationHasChanged)
     {
-        if (auto* xform = element->GetComponent<TransformComponent>())
-            xform->SetRotationDegrees(rotation());
+        if (!ignoreRotationFeedback)
+        {
+            if (auto* xform = element->GetComponent<TransformComponent>())
+                xform->SetRotationDegrees(rotation());
+        }
     }
 
     if (change == ItemScaleHasChanged)
     {
-        if (auto* xform = element->GetComponent<TransformComponent>())
-            xform->SetScale(QPointF(scale(), scale()));
+        // If you ever let users scale the QGraphicsItem directly, you can write back here.
+        // Currently we scale via rect, so leaving as-is is fine or remove this block.
     }
 
     return QGraphicsObject::itemChange(change, value);
 }
-
 
 void SceneElementItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*)
 {

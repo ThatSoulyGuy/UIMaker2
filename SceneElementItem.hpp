@@ -27,6 +27,9 @@ public:
         return element;
     }
 
+    void setPosFromComponent(const QPointF& p);
+    void setRotationFromComponent(double deg);
+
 protected:
 
     QVariant itemChange(GraphicsItemChange change, const QVariant& value) override;
@@ -41,6 +44,9 @@ private:
     UiElement* element;
     QRectF localRect;
     bool pendingRefresh = false;
+
+    bool ignorePositionFeedback = false;
+    bool ignoreRotationFeedback = false;
 };
 
 #endif

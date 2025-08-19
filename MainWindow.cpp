@@ -3,6 +3,7 @@
 #include <QTimer>
 #include <QWheelEvent>
 #include <QScrollBar>
+#include "SceneElementItem.hpp"
 #include "MainWindow.hpp"
 #include "./ui_mainwindow.h"
 
@@ -167,10 +168,10 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
             }
         }
 
-        // --- Keyboard shortcuts: F to focus selection, Ctrl+0 to fit whole scene ---
         if (event->type() == QEvent::KeyPress)
         {
             auto* ke = static_cast<QKeyEvent*>(event);
+
             if (ke->key() == Qt::Key_F)
             {
                 if (auto* s = document->GetScene())
@@ -179,6 +180,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                     if (!selected.isEmpty()) { FitItem(selected.first()); event->accept(); return true; }
                 }
             }
+
             if ((ke->modifiers() & Qt::ControlModifier) && ke->key() == Qt::Key_0)
             {
                 ui->graphicsView->fitInView(document->GetScene()->sceneRect(), Qt::KeepAspectRatio);
@@ -337,17 +339,38 @@ void MainWindow::ConnectActions()
 void MainWindow::AttachScene(QGraphicsScene* scene)
 {
     QObject::disconnect(sceneRectChangedConnection);
-    if (scene == nullptr)
-        return;
+    QObject::disconnect(sceneSelectionConnection);
+
+    if (!scene) return;
 
     sceneRectChangedConnection = connect(scene, &QGraphicsScene::sceneRectChanged, this, [this, scene](const QRectF&)
     {
-        if (!ui->graphicsView->viewport()->size().isEmpty()) { ui->graphicsView->fitInView(scene->sceneRect(), Qt::KeepAspectRatio); }
+        if (!ui->graphicsView->viewport()->size().isEmpty())
+            ui->graphicsView->fitInView(scene->sceneRect(), Qt::KeepAspectRatio);
+    });
+
+    sceneSelectionConnection = connect(scene, &QGraphicsScene::selectionChanged, this, [this]()
+    {
+        auto items = document->GetScene()->selectedItems();
+
+        if (items.isEmpty())
+            return;
+
+        if (auto* se = static_cast<SceneElementItem*>(items.first()))
+        {
+            UiElement* e = se->GetElement();
+
+            auto idx = hierarchyModel->GetIndexFromElement(e);
+
+            hierarchySelection->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+            propertyPanel->SetTarget(e);
+        }
     });
 
     QTimer::singleShot(0, this, [this, scene]()
     {
-        if (!ui->graphicsView->viewport()->size().isEmpty()) { ui->graphicsView->fitInView(scene->sceneRect(), Qt::KeepAspectRatio); }
+        if (!ui->graphicsView->viewport()->size().isEmpty())
+            ui->graphicsView->fitInView(scene->sceneRect(), Qt::KeepAspectRatio);
     });
 }
 

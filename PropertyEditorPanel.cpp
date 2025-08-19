@@ -522,7 +522,9 @@ void PropertyEditorPanel::Rebuild()
     if (!target)
         return;
 
-    auto* nameRow = new QWidget(); auto* nameLayout = new QHBoxLayout();
+    auto* nameRow = new QWidget();
+
+    auto* nameLayout = new QHBoxLayout();
 
     nameLayout->setContentsMargins(0,0,0,0);
 

@@ -162,6 +162,7 @@ QByteArray SceneDocument::ExportJson() const
 bool SceneDocument::LoadJson(const QByteArray& data)
 {
     QJsonParseError err;
+
     QJsonDocument doc = QJsonDocument::fromJson(data, &err);
 
     if (err.error != QJsonParseError::NoError || !doc.isObject())
@@ -170,7 +171,11 @@ bool SceneDocument::LoadJson(const QByteArray& data)
     scene->clear();
     items.clear();
 
-    rootRect = scene->addRect(scene->sceneRect(), Qt::NoPen, QBrush(Qt::white));
+    QPen borderPen(QColor(220, 220, 220));
+
+    borderPen.setCosmetic(true);
+    borderPen.setWidth(1);
+    rootRect = scene->addRect(scene->sceneRect(), borderPen, Qt::NoBrush);
     rootRect->setZValue(-1);
 
     delete root;
@@ -179,27 +184,25 @@ bool SceneDocument::LoadJson(const QByteArray& data)
     QJsonObject rootObj = doc.object();
     root->SetName(rootObj["name"].toString("Root"));
 
-    QJsonArray rootComps = rootObj["components"].toArray();
-    for (const QJsonValue& v : rootComps)
+    for (const QJsonValue& v : rootObj["components"].toArray())
     {
-        QJsonObject c = v.toObject();
-        QString kind = c["kind"].toString();
-        if (auto* comp = Component::Create(kind, root))
+        const QJsonObject c = v.toObject();
+
+        if (auto* comp = Component::Create(c["kind"].toString(), root))
             comp->FromJson(c);
     }
 
-    QJsonArray children = rootObj["children"].toArray();
-    for (const QJsonValue& v : children)
-    {
-        QJsonObject childObj = v.toObject();
-        CreateElementFromJson(childObj, root);
-    }
+    for (const QJsonValue& v : rootObj["children"].toArray())
+        CreateElementFromJson(v.toObject(), root);
+
+    QObject::connect(scene, &QGraphicsScene::sceneRectChanged, this, [this](const QRectF& r){ if (rootRect) rootRect->setRect(r); });
 
     QObject::connect(root, &UiElement::StructureChanged, this, &SceneDocument::OnStructureChanged);
     OnStructureChanged();
 
     return true;
 }
+
 
 void SceneDocument::SetSelected(UiElement* e)
 {

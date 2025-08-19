@@ -53,6 +53,7 @@ private:
     PropertyEditorPanel* propertyPanel;
 
     QMetaObject::Connection sceneRectChangedConnection;
+    QMetaObject::Connection sceneSelectionConnection;
 };
 
 #endif
