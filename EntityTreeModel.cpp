@@ -21,13 +21,13 @@ static UiElement* ElementAtRow(UiElement* parent, int row)
 
 static int RowOfElement(UiElement* element)
 {
-    if (!element || !element->parent())
-        return 0;
+    if (!element)
+        return -1;
 
     auto* p = qobject_cast<UiElement*>(element->parent());
 
     if (!p)
-        return 0;
+        return -1;
 
     int i = -1;
 
@@ -36,13 +36,11 @@ static int RowOfElement(UiElement* element)
         if (auto* e = qobject_cast<UiElement*>(c))
         {
             ++i;
-
-            if (e == element)
-                return i;
+            if (e == element) return i;
         }
     }
 
-    return 0;
+    return -1;
 }
 
 EntityTreeModel::EntityTreeModel(UiElement* root, QObject* parent) : QAbstractItemModel(parent), root(root)
@@ -205,16 +203,21 @@ UiElement* EntityTreeModel::GetElementFromIndex(const QModelIndex& idx) const
 
 QModelIndex EntityTreeModel::GetIndexFromElement(UiElement* element) const
 {
-    if (element == nullptr || element == root)
+    if (!element || element == root)
         return {};
 
     UiElement* parentElement = qobject_cast<UiElement*>(element->parent());
-    QModelIndex parentIdx = {};
+    QModelIndex parentIdx;
 
     if (parentElement && parentElement != root)
         parentIdx = GetIndexFromElement(parentElement);
 
-    return index(RowOfElement(element), 0, parentIdx);
+    const int row = RowOfElement(element);
+
+    if (row < 0)
+        return {};
+
+    return index(row, 0, parentIdx);
 }
 
 void EntityTreeModel::OnStructureChanged()

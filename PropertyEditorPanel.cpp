@@ -56,14 +56,18 @@ void PropertyEditorPanel::SetTarget(UiElement* element)
 
     if (target)
     {
-        QObject::connect(target, &UiElement::ComponentListChanged, this, [this](UiElement*)
+        QObject::connect(target, &UiElement::ComponentListChanged, this, [this](UiElement*) { Rebuild(); });
+        QObject::connect(target, &QObject::destroyed, this, [this]()
         {
+            target = nullptr;
+            pendingRebuild = false;
             Rebuild();
         });
     }
 
     Rebuild();
 }
+
 void PropertyEditorPanel::OnComponentChanged()
 {
     if (suppressRebuild)
@@ -175,7 +179,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         return edit;
     }
 
-    if (name == "anchors")
+    if (name == "anchors" || name == "alignment")
     {
         auto* row = new QWidget();
         auto* h = new QHBoxLayout();

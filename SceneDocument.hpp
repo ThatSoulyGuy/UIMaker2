@@ -30,6 +30,9 @@ public:
     UiElement* CreateTextElement(const QString& name, UiElement* parent = nullptr);
     UiElement* CreateButtonElement(const QString& name, UiElement* parent = nullptr);
 
+    UiElement* CreateElementFromJson(const QJsonObject& obj, UiElement* parent);
+    void DeleteElement(UiElement* e);
+
     SceneElementItem* GetItem(UiElement* e) const
     {
         return items.value(e, nullptr);
@@ -53,7 +56,6 @@ private slots:
 private:
 
     SceneElementItem* CreateItemFor(UiElement* e);
-    UiElement* CreateElementFromJson(const QJsonObject& obj, UiElement* parent);
     void UpdateZValues(UiElement* parent);
 
     UiElement* root;

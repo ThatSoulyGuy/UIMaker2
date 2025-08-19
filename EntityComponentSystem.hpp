@@ -97,7 +97,7 @@ signals:
 
 };
 
-class TransformComponent : public Component
+class EnumHolder : public QObject
 {
 
     Q_OBJECT
@@ -118,6 +118,20 @@ public:
     Q_ENUM(Anchor)
     Q_DECLARE_FLAGS(AnchorFlags, Anchor)
     Q_FLAG(AnchorFlags)
+};
+
+using Anchor = EnumHolder::Anchor;
+using AnchorFlags = EnumHolder::AnchorFlags;
+
+Q_DECLARE_METATYPE(AnchorFlags)
+Q_DECLARE_OPERATORS_FOR_FLAGS(AnchorFlags)
+
+class TransformComponent : public Component
+{
+
+    Q_OBJECT
+
+public:
 
     Q_PROPERTY(QPointF position READ GetPosition WRITE SetPosition NOTIFY ComponentChanged)
     Q_PROPERTY(double rotationDegrees READ GetRotationDegrees WRITE SetRotationDegrees NOTIFY ComponentChanged)
@@ -125,7 +139,7 @@ public:
     Q_PROPERTY(AnchorFlags anchors READ GetAnchors WRITE SetAnchors NOTIFY ComponentChanged)
     Q_PROPERTY(AnchorFlags stretch READ GetStretch WRITE SetStretch NOTIFY ComponentChanged)
 
-    explicit TransformComponent(QObject* parent = nullptr) : Component(parent), position(0.0, 0.0), rotationDegrees(0.0), scale(100.0, 100.0), anchors((int)Anchor::LEFT | (int)Anchor::TOP), stretch(Anchor::NONE) { }
+    explicit TransformComponent(QObject* parent = nullptr) : Component(parent), position(0.0, 0.0), rotationDegrees(0.0), scale(100.0, 100.0), anchors(Anchor::LEFT | Anchor::TOP), stretch(Anchor::NONE) { }
 
     QString GetTypeName() const override
     {
@@ -303,13 +317,6 @@ private:
     static const bool registered;
 
 };
-
-using Anchor = TransformComponent::Anchor;
-using AnchorFlags = TransformComponent::AnchorFlags;
-
-Q_DECLARE_METATYPE(AnchorFlags)
-Q_DECLARE_OPERATORS_FOR_FLAGS(AnchorFlags)
-
 class ImageComponent : public Component
 {
     Q_OBJECT
@@ -446,11 +453,17 @@ class TextComponent : public Component
     Q_PROPERTY(QColor color READ GetColor WRITE SetColor NOTIFY ComponentChanged)
     Q_PROPERTY(QString fontPath READ GetFontPath WRITE SetFontPath NOTIFY ComponentChanged)
     Q_PROPERTY(QString assetPath READ GetAssetPath WRITE SetAssetPath NOTIFY ComponentChanged)
+    Q_PROPERTY(AnchorFlags alignment READ GetAlignment WRITE SetAlignment NOTIFY ComponentChanged)
 
 public:
 
-    explicit TextComponent(QObject* parent = nullptr) : Component(parent), fontFamily("Inter"), pixelSize(24), color(Qt::white) { }
-    QString GetTypeName() const override { return QStringLiteral("Text"); }
+    explicit TextComponent(QObject* parent = nullptr) : Component(parent), fontFamily("Inter"), pixelSize(24), color(Qt::white), alignment(Anchor::LEFT | Anchor::TOP) { }
+
+    QString GetTypeName() const override
+    {
+        return QStringLiteral("Text");
+    }
+
     void Update(class SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override
     {
         Q_UNUSED(item);
@@ -472,11 +485,24 @@ public:
         painter->setFont(font);
         painter->setPen(color);
 
-        QFontMetrics fm(font);
+        Qt::Alignment a = Qt::Alignment();
 
-        const QPointF drawPos = rect.topLeft() + QPointF(0.0, rect.height() - fm.descent());
+        if (alignment.testFlag(Anchor::RIGHT))
+            a |= Qt::AlignRight;
+        else if (alignment.testFlag(Anchor::CENTER_X))
+            a |= Qt::AlignHCenter;
+        else
+            a |= Qt::AlignLeft;
 
-        painter->drawText(drawPos, text);
+        if (alignment.testFlag(Anchor::BOTTOM))
+            a |= Qt::AlignBottom;
+        else if (alignment.testFlag(Anchor::CENTER_Y))
+            a |= Qt::AlignVCenter;
+        else
+            a |= Qt::AlignTop;
+
+        painter->setClipRect(rect);
+        painter->drawText(rect, a, text);
 
         if (selected)
         {
@@ -486,7 +512,6 @@ public:
         }
 
         painter->restore();
-
         return true;
     }
 
@@ -501,6 +526,33 @@ public:
             return;
 
         text = v;
+
+        NotifyChanged();
+    }
+
+    AnchorFlags GetAlignment() const noexcept
+    {
+        return alignment;
+    }
+
+    void SetAlignment(AnchorFlags value)
+    {
+        AnchorFlags sanitized = value;
+
+        if (sanitized.testFlag(Anchor::CENTER_X))
+            sanitized &= ~AnchorFlags((int)Anchor::LEFT | (int)Anchor::RIGHT);
+        else if (sanitized.testFlag(Anchor::LEFT) || sanitized.testFlag(Anchor::RIGHT))
+            sanitized &= ~AnchorFlags(Anchor::CENTER_X);
+
+        if (sanitized.testFlag(Anchor::CENTER_Y))
+            sanitized &= ~AnchorFlags((int)Anchor::TOP | (int)Anchor::BOTTOM);
+        else if (sanitized.testFlag(Anchor::TOP) || sanitized.testFlag(Anchor::BOTTOM))
+            sanitized &= ~AnchorFlags(Anchor::CENTER_Y);
+
+        if (alignment == sanitized)
+            return;
+
+        alignment = sanitized;
 
         NotifyChanged();
     }
@@ -601,6 +653,7 @@ public:
         out["color"] = color.name(QColor::HexArgb);
         out["fontPath"] = fontPath;
         out["assetPath"] = assetPath;
+        out["alignment"] = static_cast<int>(alignment);
     }
 
     void FromJson(const QJsonObject& in) override
@@ -611,7 +664,9 @@ public:
         SetColor(QColor(in["color"].toString("#FFFFFFFF")));
         SetFontPath(in["fontPath"].toString());
         SetAssetPath(in["assetPath"].toString());
+        SetAlignment(static_cast<AnchorFlags>(in["alignment"].toInt(static_cast<int>((int)Anchor::LEFT | (int)Anchor::TOP))));
     }
+
 
 private:
 
@@ -621,6 +676,7 @@ private:
     QColor color;
     QString fontPath;
     QString assetPath;
+    AnchorFlags alignment;
 
     static const bool registered;
 
@@ -636,6 +692,11 @@ class ButtonComponent : public Component
     Q_PROPERTY(int pixelSize READ GetPixelSize WRITE SetPixelSize NOTIFY ComponentChanged)
     Q_PROPERTY(QString fontPath READ GetFontPath WRITE SetFontPath NOTIFY ComponentChanged)
     Q_PROPERTY(QString assetPath READ GetAssetPath WRITE SetAssetPath NOTIFY ComponentChanged)
+    Q_PROPERTY(QString imagePath READ GetImagePath WRITE SetImagePath NOTIFY ComponentChanged)
+    Q_PROPERTY(int sliceLeft READ GetSliceLeft WRITE SetSliceLeft NOTIFY ComponentChanged)
+    Q_PROPERTY(int sliceTop READ GetSliceTop WRITE SetSliceTop NOTIFY ComponentChanged)
+    Q_PROPERTY(int sliceRight READ GetSliceRight WRITE SetSliceRight NOTIFY ComponentChanged)
+    Q_PROPERTY(int sliceBottom READ GetSliceBottom WRITE SetSliceBottom NOTIFY ComponentChanged)
 
 public:
 
@@ -650,6 +711,7 @@ public:
     {
         Q_UNUSED(item);
         Q_UNUSED(parentRect);
+
         QFont font(fontFamily, pixelSize);
         QFontMetrics fm(font);
 
@@ -657,15 +719,21 @@ public:
 
         rect = QRectF(QPointF(0.0, 0.0), size);
     }
+
     bool Paint(QPainter* painter, const QRectF& rect, bool selected) override
     {
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing, true);
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(backgroundColor);
-        painter->drawRoundedRect(rect, 6.0, 6.0);
+        painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+
+        const QPixmap& skin = !customSkin.isNull() ? customSkin : EnsureDefaultSkin();
+
+        DrawNineSlice(painter, rect, skin, sliceLeft, sliceTop, sliceRight, sliceBottom);
+
         painter->setPen(textColor);
+
         QFont font(fontFamily, pixelSize);
+
         painter->setFont(font);
         painter->drawText(rect, Qt::AlignCenter, text);
 
@@ -798,6 +866,102 @@ public:
         NotifyChanged();
     }
 
+    QString GetImagePath() const noexcept
+    {
+        return imagePath;
+    }
+
+    void SetImagePath(const QString& v)
+    {
+        if (imagePath == v)
+            return;
+
+        imagePath = v;
+        customSkin = QPixmap();
+
+        if (!imagePath.isEmpty())
+        {
+            QPixmap loaded(imagePath);
+
+            if (!loaded.isNull())
+                customSkin = loaded;
+        }
+
+        NotifyChanged();
+    }
+
+    int GetSliceLeft() const noexcept
+    {
+        return sliceLeft;
+    }
+
+    int GetSliceTop() const noexcept
+    {
+        return sliceTop;
+    }
+
+    int GetSliceRight() const noexcept
+    {
+        return sliceRight;
+    }
+
+    int GetSliceBottom() const noexcept
+    {
+        return sliceBottom;
+    }
+
+    void SetSliceLeft(int v)
+    {
+        v = std::max(0, v);
+
+        if (sliceLeft == v)
+            return;
+
+        sliceLeft = v;
+
+        InvalidateDefaultSkin();
+        NotifyChanged();
+    }
+
+    void SetSliceTop(int v)
+    {
+        v = std::max(0, v);
+
+        if (sliceTop == v)
+            return;
+
+        sliceTop = v;
+
+        InvalidateDefaultSkin();
+        NotifyChanged();
+    }
+
+    void SetSliceRight(int v)
+    {
+        v = std::max(0, v);
+
+        if (sliceRight == v)
+            return;
+
+        sliceRight = v;
+
+        InvalidateDefaultSkin();
+        NotifyChanged();
+    }
+
+    void SetSliceBottom(int v)
+    {
+        v = std::max(0, v);
+
+        if (sliceBottom == v)
+            return;
+
+        sliceBottom = v;
+
+        InvalidateDefaultSkin();
+        NotifyChanged();
+    }
+
     void ToJson(QJsonObject& out) const override
     {
         out["kind"] = "Button";
@@ -808,6 +972,11 @@ public:
         out["pixelSize"] = pixelSize;
         out["fontPath"] = fontPath;
         out["assetPath"] = assetPath;
+        out["imagePath"] = imagePath;
+        out["sliceLeft"] = sliceLeft;
+        out["sliceTop"] = sliceTop;
+        out["sliceRight"] = sliceRight;
+        out["sliceBottom"] = sliceBottom;
     }
 
     void FromJson(const QJsonObject& in) override
@@ -819,9 +988,129 @@ public:
         SetPixelSize(in["pixelSize"].toInt(pixelSize));
         SetFontPath(in["fontPath"].toString());
         SetAssetPath(in["assetPath"].toString());
+        SetImagePath(in["imagePath"].toString());
+        SetSliceLeft(in["sliceLeft"].toInt(6));
+        SetSliceTop(in["sliceTop"].toInt(6));
+        SetSliceRight(in["sliceRight"].toInt(6));
+        SetSliceBottom(in["sliceBottom"].toInt(6));
     }
 
 private:
+
+    mutable QPixmap defaultSkin;
+    mutable QColor defaultSkinColor;
+
+    void InvalidateDefaultSkin()
+    {
+        defaultSkin = QPixmap();
+    }
+
+    const QPixmap& EnsureDefaultSkin() const
+    {
+        if (!defaultSkin.isNull() && defaultSkinColor == backgroundColor)
+            return defaultSkin;
+
+        const int baseW = std::max(48, sliceLeft + sliceRight + 24);
+        const int baseH = std::max(32, sliceTop  + sliceBottom + 16);
+
+        QPixmap pm(baseW, baseH);
+        pm.fill(Qt::transparent);
+
+        QPainter p(&pm);
+
+        p.setRenderHint(QPainter::Antialiasing, true);
+
+        QLinearGradient g(0, 0, 0, baseH);
+
+        QColor top = backgroundColor.lighter(115);
+        QColor bot = backgroundColor.darker(105);
+
+        g.setColorAt(0.0, top);
+        g.setColorAt(1.0, bot);
+
+        p.setPen(Qt::NoPen);
+        p.setBrush(g);
+        p.drawRoundedRect(QRectF(0.5, 0.5, baseW - 1.0, baseH - 1.0), 6.0, 6.0);
+
+        p.setPen(QPen(QColor(0, 0, 0, 110), 1.0));
+        p.setBrush(Qt::NoBrush);
+        p.drawRoundedRect(QRectF(0.5, 0.5, baseW - 1.0, baseH - 1.0), 6.0, 6.0);
+
+        p.setPen(QPen(QColor(255, 255, 255, 35), 1.0));
+        p.drawLine(QPointF(6.0, 1.0), QPointF(baseW - 6.0, 1.0));
+
+        p.end();
+
+        defaultSkin = pm;
+        defaultSkinColor = backgroundColor;
+
+        return defaultSkin;
+    }
+
+    static void DrawNineSlice(QPainter* painter, const QRectF& dest, const QPixmap& img, int l, int t, int r, int b)
+    {
+        if (img.isNull() || dest.isEmpty())
+            return;
+
+        const int iw = img.width();
+        const int ih = img.height();
+
+        const int midW = iw - l - r;
+        const int midH = ih - t - b;
+
+        if (midW <= 0 || midH <= 0)
+        {
+            painter->drawPixmap(dest, img, QRectF(0, 0, iw, ih));
+            return;
+        }
+
+        const qreal dl = std::min<qreal>(l, dest.width()  * 0.5);
+        const qreal dt = std::min<qreal>(t, dest.height() * 0.5);
+        const qreal dr = std::min<qreal>(r, dest.width()  - dl);
+        const qreal db = std::min<qreal>(b, dest.height() - dt);
+        const qreal dw = std::max<qreal>(0.0, dest.width()  - dl - dr);
+        const qreal dh = std::max<qreal>(0.0, dest.height() - dt - db);
+
+        const qreal x0 = dest.x();
+        const qreal y0 = dest.y();
+        const qreal x1 = x0 + dl;
+        const qreal x2 = x1 + dw;
+        const qreal y1 = y0 + dt;
+        const qreal y2 = y1 + dh;
+
+        auto SR = [](int x, int y, int w, int h){ return QRectF(x, y, w, h); };
+        auto DR = [](qreal x, qreal y, qreal w, qreal h){ return QRectF(x, y, w, h); };
+
+        const QRectF sTL = SR(0,       0,       l,   t);
+        const QRectF sT = SR(l,       0,       midW,t);
+        const QRectF sTR = SR(l+midW,  0,       r,   t);
+        const QRectF sL = SR(0,       t,       l,   midH);
+        const QRectF sC = SR(l,       t,       midW,midH);
+        const QRectF sR = SR(l+midW,  t,       r,   midH);
+        const QRectF sBL = SR(0,       t+midH,  l,   b);
+        const QRectF sB = SR(l,       t+midH,  midW,b);
+        const QRectF sBR = SR(l+midW,  t+midH,  r,   b);
+
+        const QRectF dTL = DR(x0, y0, dl, dt);
+        const QRectF dT = DR(x1, y0, dw, dt);
+        const QRectF dTR = DR(x2, y0, dr, dt);
+        const QRectF dL = DR(x0, y1, dl, dh);
+        const QRectF dC = DR(x1, y1, dw, dh);
+        const QRectF dR = DR(x2, y1, dr, dh);
+        const QRectF dBL = DR(x0, y2, dl, db);
+        const QRectF dB = DR(x1, y2, dw, db);
+        const QRectF dBR = DR(x2, y2, dr, db);
+
+        painter->drawPixmap(dTL, img, sTL);
+        painter->drawPixmap(dT, img, sT);
+        painter->drawPixmap(dTR, img, sTR);
+        painter->drawPixmap(dL, img, sL);
+        painter->drawPixmap(dC, img, sC);
+        painter->drawPixmap(dR, img, sR);
+        painter->drawPixmap(dBL, img, sBL);
+        painter->drawPixmap(dB, img, sB);
+        painter->drawPixmap(dBR, img, sBR);
+    }
 
     QString text;
     QColor backgroundColor;
@@ -830,6 +1119,14 @@ private:
     int pixelSize;
     QString fontPath;
     QString assetPath;
+
+    QString imagePath;
+    QPixmap customSkin;
+
+    int sliceLeft   = 6;
+    int sliceTop    = 6;
+    int sliceRight  = 6;
+    int sliceBottom = 6;
 
     static const bool registered;
 

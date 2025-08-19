@@ -203,6 +203,42 @@ bool SceneDocument::LoadJson(const QByteArray& data)
     return true;
 }
 
+void SceneDocument::DeleteElement(UiElement* e)
+{
+    if (!e || e == root)
+        return;
+
+    SetSelected(nullptr);
+
+    std::function<void(UiElement*)> removeRec = [&](UiElement* n)
+    {
+        const QObjectList kids = n->children();
+
+        for (QObject* c : kids)
+        {
+            if (auto* ce = qobject_cast<UiElement*>(c))
+                removeRec(ce);
+        }
+
+        if (auto* it = items.take(n))
+        {
+            scene->removeItem(it);
+            delete it;
+        }
+    };
+
+    removeRec(e);
+
+    UiElement* parent = qobject_cast<UiElement*>(e->parent());
+    e->setParent(nullptr);
+    delete e;
+
+    if (parent)
+        emit parent->StructureChanged();
+
+    emit root->StructureChanged();
+}
+
 
 void SceneDocument::SetSelected(UiElement* e)
 {

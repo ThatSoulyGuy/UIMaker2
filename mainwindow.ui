@@ -48,6 +48,16 @@
     <addaction name="ActionAddImage"/>
     <addaction name="ActionAddButton"/>
     <addaction name="ActionAddText"/>
+    <addaction name="separator"/>
+    <addaction name="ActionCopy"/>
+    <addaction name="ActionPaste"/>
+    <addaction name="ActionCut"/>
+    <addaction name="ActionDuplicate"/>
+    <addaction name="separator"/>
+    <addaction name="ActionUndo_2"/>
+    <addaction name="ActionRedo_2"/>
+    <addaction name="separator"/>
+    <addaction name="ActionDelete"/>
    </widget>
    <addaction name="MenuFile"/>
    <addaction name="MenuEdit"/>
@@ -140,6 +150,41 @@
   <action name="ActionExport">
    <property name="text">
     <string>Export</string>
+   </property>
+  </action>
+  <action name="ActionCopy">
+   <property name="text">
+    <string>Copy</string>
+   </property>
+  </action>
+  <action name="ActionPaste">
+   <property name="text">
+    <string>Paste</string>
+   </property>
+  </action>
+  <action name="ActionCut">
+   <property name="text">
+    <string>Cut</string>
+   </property>
+  </action>
+  <action name="ActionDuplicate">
+   <property name="text">
+    <string>Duplicate</string>
+   </property>
+  </action>
+  <action name="ActionUndo_2">
+   <property name="text">
+    <string>Undo</string>
+   </property>
+  </action>
+  <action name="ActionRedo_2">
+   <property name="text">
+    <string>Redo</string>
+   </property>
+  </action>
+  <action name="ActionDelete">
+   <property name="text">
+    <string>Delete</string>
    </property>
   </action>
  </widget>

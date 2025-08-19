@@ -3,13 +3,46 @@
 #include <QTimer>
 #include <QWheelEvent>
 #include <QScrollBar>
+#include <QClipboard>
+#include <QMimeData>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QUndoCommand>
+#include <QUndoStack>
 #include "SceneElementItem.hpp"
 #include "MainWindow.hpp"
 #include "./ui_mainwindow.h"
 
+class JsonSceneCommand : public QUndoCommand
+{
+
+public:
+
+    JsonSceneCommand(MainWindow* mw, QByteArray before, QByteArray after, QString text) : QUndoCommand(std::move(text)), mw(mw), before(std::move(before)), after(std::move(after)) { }
+
+    void undo() override
+    {
+        if (mw)
+            mw->ApplySceneJson(before);
+    }
+
+    void redo() override
+    {
+        if (mw)
+            mw->ApplySceneJson(after);
+    }
+
+private:
+
+    MainWindow* mw;
+    QByteArray before, after;
+};
+
+
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::UIMaker2)
 {
     ui->setupUi(this);
+    undoStack = new QUndoStack(this);
 
     document = new SceneDocument(this);
 
@@ -37,6 +70,36 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::UIMake
 MainWindow::~MainWindow()
 {
     delete ui;
+}
+
+UiElement* MainWindow::CurrentElement() const
+{
+    if (!hierarchyModel || !hierarchySelection) return nullptr;
+    return hierarchyModel->GetElementFromIndex(hierarchySelection->currentIndex());
+}
+
+void MainWindow::ApplySceneJson(const QByteArray& bytes)
+{
+    if (!document)
+        return;
+
+    if (!document->LoadJson(bytes))
+        return;
+
+    ui->graphicsView->setScene(document->GetScene());
+    AttachScene(document->GetScene());
+
+    delete hierarchyModel;
+    hierarchyModel = new EntityTreeModel(document->GetRoot(), this);
+
+    delete hierarchySelection;
+    hierarchySelection = new QItemSelectionModel(hierarchyModel, this);
+
+    hierarchyView->setModel(hierarchyModel);
+    hierarchyView->setSelectionModel(hierarchySelection);
+    WireHierarchySignals();
+
+    propertyPanel->SetTarget(document->GetRoot());
 }
 
 void MainWindow::BuildHierarchyDock()
@@ -337,6 +400,26 @@ void MainWindow::ConnectActions()
         WireHierarchySignals();
         propertyPanel->SetTarget(document->GetRoot());
     });
+
+    ui->ActionCopy->setShortcut(QKeySequence::Copy);
+    ui->ActionPaste->setShortcut(QKeySequence::Paste);
+    ui->ActionCut->setShortcut(QKeySequence::Cut);
+
+    connect(ui->ActionCopy, &QAction::triggered, this, &MainWindow::DoCopy);
+    connect(ui->ActionPaste, &QAction::triggered, this, &MainWindow::DoPaste);
+    connect(ui->ActionCut, &QAction::triggered, this, &MainWindow::DoCut);
+
+    ui->ActionDuplicate->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_D));
+    connect(ui->ActionDuplicate, &QAction::triggered, this, &MainWindow::DoDuplicate);
+
+    ui->ActionDelete->setShortcut(QKeySequence::Delete);
+    connect(ui->ActionDelete, &QAction::triggered, this, &MainWindow::DoDelete);
+
+    ui->ActionUndo_2->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Z));
+    ui->ActionRedo_2->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_R));
+
+    connect(ui->ActionUndo_2, &QAction::triggered, this, &MainWindow::DoUndo);
+    connect(ui->ActionRedo_2, &QAction::triggered, this, &MainWindow::DoRedo);
 }
 
 void MainWindow::WireHierarchySignals()
@@ -430,4 +513,140 @@ void MainWindow::FitItem(QGraphicsItem* item)
     const QRectF r = item->sceneBoundingRect().adjusted(-20.0, -20.0, 20.0, 20.0);
 
     ui->graphicsView->fitInView(r, Qt::KeepAspectRatio);
+}
+
+void MainWindow::DoCopy()
+{
+    UiElement* e = CurrentElement();
+
+    if (!e)
+        return;
+
+    QJsonObject obj;
+    e->ToJson(obj);
+
+    QJsonDocument doc(obj);
+    QByteArray bytes = doc.toJson(QJsonDocument::Compact);
+
+    auto* mime = new QMimeData();
+
+    mime->setData(kElementMime, bytes);
+    mime->setText(QString::fromUtf8(bytes));
+
+    QGuiApplication::clipboard()->setMimeData(mime);
+}
+
+void MainWindow::DoPaste()
+{
+    const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+
+    if (!mime)
+        return;
+
+    QByteArray bytes;
+
+    if (mime->hasFormat(kElementMime))
+        bytes = mime->data(kElementMime);
+    else if (mime->hasText())
+        bytes = mime->text().toUtf8();
+    else
+        return;
+
+    QJsonParseError err{};
+    QJsonDocument doc = QJsonDocument::fromJson(bytes, &err);
+
+    if (err.error != QJsonParseError::NoError || !doc.isObject())
+        return;
+
+    UiElement* current = CurrentElement();
+    UiElement* parent  = current ? qobject_cast<UiElement*>(current->parent()) : document->GetRoot();
+
+    if (!parent)
+        parent = document->GetRoot();
+
+    const QByteArray before = document->ExportJson();
+
+    document->CreateElementFromJson(doc.object(), parent);
+
+    const QByteArray after = document->ExportJson();
+
+    ApplySceneJson(before);
+    undoStack->push(new JsonSceneCommand(this, before, after, "Paste"));
+}
+
+void MainWindow::DoCut()
+{
+    UiElement* e = CurrentElement();
+
+    if (!e || e == document->GetRoot())
+        return;
+
+    DoCopy();
+
+    const QByteArray before = document->ExportJson();
+    document->DeleteElement(e);
+    const QByteArray after  = document->ExportJson();
+
+    ApplySceneJson(before);
+
+    undoStack->push(new JsonSceneCommand(this, before, after, "Cut"));
+}
+
+void MainWindow::DoDuplicate()
+{
+    UiElement* e = CurrentElement();
+
+    if (!e || e == document->GetRoot())
+        return;
+
+    QJsonObject obj; e->ToJson(obj);
+
+    const QByteArray before = document->ExportJson();
+
+    UiElement* parent = qobject_cast<UiElement*>(e->parent());
+
+    if (!parent)
+        parent = document->GetRoot();
+
+    UiElement* dup = document->CreateElementFromJson(obj, parent);
+
+    if (dup)
+    {
+        if (auto* t = dup->GetComponent<TransformComponent>())
+            t->SetPosition(t->GetPosition() + QPointF(20.0, 20.0));
+
+        dup->SetName(e->GetName() + " Copy");
+    }
+
+    const QByteArray after = document->ExportJson();
+
+    ApplySceneJson(before);
+    undoStack->push(new JsonSceneCommand(this, before, after, "Duplicate"));
+}
+
+void MainWindow::DoDelete()
+{
+    UiElement* e = CurrentElement();
+
+    if (!e || e == document->GetRoot())
+        return;
+
+    const QByteArray before = document->ExportJson();
+    document->DeleteElement(e);
+    const QByteArray after  = document->ExportJson();
+
+    ApplySceneJson(before);
+    undoStack->push(new JsonSceneCommand(this, before, after, "Delete"));
+}
+
+void MainWindow::DoUndo()
+{
+    if (undoStack)
+        undoStack->undo();
+}
+
+void MainWindow::DoRedo()
+{
+    if (undoStack)
+        undoStack->redo();
 }

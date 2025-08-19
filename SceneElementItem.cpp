@@ -1,6 +1,7 @@
 #include "SceneElementItem.hpp"
 #include <QFontMetrics>
 #include <QGraphicsScene>
+#include <QPointer>
 #include <cmath>
 #include <algorithm>
 #include "EntityComponentSystem.hpp"
@@ -26,8 +27,17 @@ void SceneElementItem::OnComponentChanged()
 
     pendingRefresh = true;
 
-    QMetaObject::invokeMethod(this, [this](){ RefreshFromComponents(); update(); pendingRefresh = false; }, Qt::QueuedConnection);
+    QPointer<SceneElementItem> guard(this);
+
+    QMetaObject::invokeMethod(this, [guard]()
+    {
+        if (!guard) return;
+        guard->RefreshFromComponents();
+        guard->update();
+        guard->pendingRefresh = false;
+    }, Qt::QueuedConnection);
 }
+
 
 void SceneElementItem::RefreshFromComponents()
 {

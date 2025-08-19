@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <QTreeView>
 #include <QGraphicsView>
+#include <QUndoStack>
 #include "SceneDocument.hpp"
 #include "EntityTreeModel.hpp"
 #include "PropertyEditorPanel.hpp"
@@ -24,6 +25,8 @@ public:
     MainWindow(QWidget* = nullptr);
     ~MainWindow();
 
+    void ApplySceneJson(const QByteArray& bytes);
+
 private slots:
 
     bool eventFilter(QObject*, QEvent*);
@@ -40,6 +43,16 @@ private:
 
     void FitItem(QGraphicsItem*);
 
+    UiElement* CurrentElement() const;
+
+    void DoCopy();
+    void DoPaste();
+    void DoCut();
+    void DoDuplicate();
+    void DoDelete();
+    void DoUndo();
+    void DoRedo();
+
     bool isPanning = false;
     QPoint lastPanPoint;
     double minZoom = 0.05;
@@ -55,6 +68,10 @@ private:
 
     QMetaObject::Connection sceneRectChangedConnection;
     QMetaObject::Connection sceneSelectionConnection;
+
+    QUndoStack* undoStack = nullptr;
+
+    static constexpr const char* kElementMime = "application/x-uimaker2-element";
 };
 
 #endif
