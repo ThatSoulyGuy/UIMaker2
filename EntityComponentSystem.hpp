@@ -125,7 +125,7 @@ public:
     Q_PROPERTY(AnchorFlags anchors READ GetAnchors WRITE SetAnchors NOTIFY ComponentChanged)
     Q_PROPERTY(AnchorFlags stretch READ GetStretch WRITE SetStretch NOTIFY ComponentChanged)
 
-    explicit TransformComponent(QObject* parent = nullptr) : Component(parent), position(0.0, 0.0), rotationDegrees(0.0), scale(1.0, 1.0), anchors((int)Anchor::LEFT | (int)Anchor::TOP), stretch(Anchor::NONE) { }
+    explicit TransformComponent(QObject* parent = nullptr) : Component(parent), position(0.0, 0.0), rotationDegrees(0.0), scale(100.0, 100.0), anchors((int)Anchor::LEFT | (int)Anchor::TOP), stretch(Anchor::NONE) { }
 
     QString GetTypeName() const override
     {
@@ -140,15 +140,25 @@ public:
     void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override
     {
         Q_UNUSED(item);
+
         QPointF pos = position;
 
-        if (stretch.testFlag(Anchor::LEFT) && stretch.testFlag(Anchor::RIGHT))
-            rect.setWidth(parentRect.width() - pos.x() * 2.0);
-        if (stretch.testFlag(Anchor::TOP) && stretch.testFlag(Anchor::BOTTOM))
-            rect.setHeight(parentRect.height() - pos.y() * 2.0);
+        double targetW = rect.width();
+        double targetH = rect.height();
 
-        rect.setWidth(std::max(0.0001, rect.width() * scale.x()));
-        rect.setHeight(std::max(0.0001, rect.height() * scale.y()));
+        if (scale.x() > 0.0) targetW = scale.x();
+        if (scale.y() > 0.0) targetH = scale.y();
+
+        if (stretch.testFlag(Anchor::LEFT) && stretch.testFlag(Anchor::RIGHT))
+            targetW = parentRect.width() - pos.x() * 2.0;
+
+        if (stretch.testFlag(Anchor::TOP) && stretch.testFlag(Anchor::BOTTOM))
+            targetH = parentRect.height() - pos.y() * 2.0;
+
+        targetW = std::max(0.0001, targetW);
+        targetH = std::max(0.0001, targetH);
+
+        rect.setSize(QSizeF(targetW, targetH));
 
         double x = pos.x();
         double y = pos.y();
@@ -166,7 +176,6 @@ public:
         item.setPosFromComponent(parentRect.topLeft() + QPointF(x, y));
         item.setRotationFromComponent(rotationDegrees);
     }
-
 
     QPointF GetPosition() const noexcept
     {
@@ -459,12 +468,14 @@ public:
         painter->save();
 
         QFont font(fontFamily, pixelSize);
+
         painter->setFont(font);
         painter->setPen(color);
 
         QFontMetrics fm(font);
 
         const QPointF drawPos = rect.topLeft() + QPointF(0.0, rect.height() - fm.descent());
+
         painter->drawText(drawPos, text);
 
         if (selected)
