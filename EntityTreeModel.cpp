@@ -209,8 +209,12 @@ QModelIndex EntityTreeModel::GetIndexFromElement(UiElement* element) const
         return {};
 
     UiElement* parentElement = qobject_cast<UiElement*>(element->parent());
+    QModelIndex parentIdx = {};
 
-    return createIndex(RowOfElement(element), 0, element).siblingAtColumn(0);
+    if (parentElement && parentElement != root)
+        parentIdx = GetIndexFromElement(parentElement);
+
+    return index(RowOfElement(element), 0, parentIdx);
 }
 
 void EntityTreeModel::OnStructureChanged()

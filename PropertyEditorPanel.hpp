@@ -45,6 +45,7 @@ private:
     QVBoxLayout* layout;
 
     bool suppressRebuild = false;
+    bool pendingRebuild = false;
 };
 
 #endif

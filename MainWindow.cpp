@@ -58,6 +58,7 @@ void MainWindow::BuildHierarchyDock()
     hierarchyView->setModel(hierarchyModel);
     hierarchyView->setSelectionModel(hierarchySelection);
 
+    WireHierarchySignals();
     layout->addWidget(hierarchyView);
     contents->setLayout(layout);
 
@@ -193,7 +194,6 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
     return QMainWindow::eventFilter(watched, event);
 }
 
-
 void MainWindow::BuildPropertyDock()
 {
     QWidget* contents = ui->PropertyEditorContents;
@@ -247,7 +247,9 @@ void MainWindow::ConnectActions()
 
     connect(ui->ActionNew, &QAction::triggered, this, [this]()
     {
-        delete document; document = new SceneDocument(this);
+        delete document;
+
+        document = new SceneDocument(this);
 
         ui->graphicsView->setScene(document->GetScene());
 
@@ -258,6 +260,7 @@ void MainWindow::ConnectActions()
         hierarchySelection = new QItemSelectionModel(hierarchyModel, this);
 
         hierarchyView->setModel(hierarchyModel); hierarchyView->setSelectionModel(hierarchySelection);
+        WireHierarchySignals();
         propertyPanel->SetTarget(document->GetRoot());
     });
 
@@ -331,10 +334,30 @@ void MainWindow::ConnectActions()
 
         hierarchyView->setModel(hierarchyModel);
         hierarchyView->setSelectionModel(hierarchySelection);
-
+        WireHierarchySignals();
         propertyPanel->SetTarget(document->GetRoot());
     });
 }
+
+void MainWindow::WireHierarchySignals()
+{
+    disconnect(hierarchySelection, nullptr, this, nullptr);
+    disconnect(hierarchyModel, nullptr, this, nullptr);
+
+    connect(hierarchySelection, &QItemSelectionModel::currentChanged, this, [this](const QModelIndex& current, const QModelIndex&)
+    {
+        UiElement* e = hierarchyModel->GetElementFromIndex(current);
+
+        document->SetSelected(e);
+        propertyPanel->SetTarget(e);
+    });
+
+    connect(hierarchyModel, &EntityTreeModel::HierarchyChanged, this, [this]()
+    {
+        hierarchyView->expandAll();
+    });
+}
+
 
 void MainWindow::AttachScene(QGraphicsScene* scene)
 {

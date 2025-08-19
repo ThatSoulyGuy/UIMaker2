@@ -57,7 +57,6 @@ void SceneElementItem::RefreshFromComponents()
     }
 }
 
-
 void SceneElementItem::setPosFromComponent(const QPointF& p)
 {
     ignorePositionFeedback = true;
@@ -78,7 +77,8 @@ QVariant SceneElementItem::itemChange(GraphicsItemChange change, const QVariant&
     {
         if (!ignorePositionFeedback)
         {
-            if (auto* xform = element->GetComponent<TransformComponent>()) {
+            if (auto* xform = element->GetComponent<TransformComponent>())
+            {
                 QRectF parentRect;
 
                 if (auto* p = parentItem())

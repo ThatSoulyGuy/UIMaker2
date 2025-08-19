@@ -33,6 +33,7 @@ private:
     void BuildHierarchyDock();
     void BuildPropertyDock();
     void ConnectActions();
+    void WireHierarchySignals();
     void AttachScene(QGraphicsScene* scene);
 
     void ZoomAt(const QPoint&, double);

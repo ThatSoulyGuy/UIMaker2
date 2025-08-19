@@ -1,4 +1,5 @@
 #include "PropertyEditorPanel.hpp"
+#include <QApplication>
 #include <QLabel>
 #include <QGroupBox>
 #include <QCheckBox>
@@ -27,6 +28,18 @@ PropertyEditorPanel::PropertyEditorPanel(QWidget* parent) : QWidget(parent), tar
     outer->addWidget(scrollArea);
 
     setLayout(outer);
+
+    connect(qApp, &QApplication::focusChanged, this, [this](QWidget*, QWidget* now)
+    {
+        const bool focusInsidePanel = (now && this->isAncestorOf(now));
+
+        if (!focusInsidePanel && pendingRebuild && !suppressRebuild)
+        {
+            pendingRebuild = false;
+
+            QTimer::singleShot(0, this, [this](){ Rebuild(); });
+        }
+    });
 }
 
 void PropertyEditorPanel::SetTarget(UiElement* element)
@@ -55,6 +68,16 @@ void PropertyEditorPanel::OnComponentChanged()
 {
     if (suppressRebuild)
         return;
+
+    QWidget* fw = QApplication::focusWidget();
+
+    const bool editingInPanel = fw && (this->isAncestorOf(fw)) && (qobject_cast<QLineEdit*>(fw) || qobject_cast<QAbstractSpinBox*>(fw) || qobject_cast<QComboBox*>(fw));
+
+    if (editingInPanel)
+    {
+        pendingRebuild = true;
+        return;
+    }
 
     QTimer::singleShot(0, this, [this](){ Rebuild(); });
 }
@@ -509,6 +532,8 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
 
 void PropertyEditorPanel::Rebuild()
 {
+    pendingRebuild = false;
+
     QLayoutItem* child;
 
     while ((child = layout->takeAt(0)) != nullptr)
