@@ -22,10 +22,11 @@ class TextComponent : public Component
     Q_PROPERTY(QString fontPath READ GetFontPath WRITE SetFontPath NOTIFY ComponentChanged)
     Q_PROPERTY(QString assetPath READ GetAssetPath WRITE SetAssetPath NOTIFY ComponentChanged)
     Q_PROPERTY(AnchorFlags alignment READ GetAlignment WRITE SetAlignment NOTIFY ComponentChanged)
+    Q_PROPERTY(bool hasBackground READ GetHasBackground WRITE SetHasBackground NOTIFY ComponentChanged)
 
 public:
 
-    explicit TextComponent(QObject* parent = nullptr) : Component(parent), fontFamily("Inter"), pixelSize(24), color(Qt::white), alignment(Anchor::LEFT | Anchor::TOP) { }
+    explicit TextComponent(QObject* parent = nullptr) : Component(parent), fontFamily("Inter"), pixelSize(24), color(Qt::white), alignment(Anchor::LEFT | Anchor::TOP), hasBackground(false) { }
 
     QString GetTypeName() const override
     {
@@ -70,6 +71,17 @@ public:
             a |= Qt::AlignTop;
 
         painter->setClipRect(rect);
+
+        if (hasBackground)
+        {
+            const qreal offset = qMax(1.0, pixelSize / 16.0);
+            painter->save();
+            painter->translate(offset, offset);
+            painter->setPen(QColor(0, 0, 0, 160));
+            painter->drawText(rect, a, text);
+            painter->restore();
+        }
+
         painter->drawText(rect, a, text);
 
         if (selected)
@@ -197,6 +209,21 @@ public:
         NotifyChanged();
     }
 
+    bool GetHasBackground() const noexcept
+    {
+        return hasBackground;
+    }
+
+    void SetHasBackground(bool v)
+    {
+        if (hasBackground == v)
+            return;
+
+        hasBackground = v;
+
+        NotifyChanged();
+    }
+
     QString GetAssetPath() const noexcept
     {
         return assetPath;
@@ -222,6 +249,7 @@ public:
         out["fontPath"] = fontPath;
         out["assetPath"] = assetPath;
         out["alignment"] = static_cast<int>(alignment);
+        out["hasBackground"] = hasBackground;
     }
 
     void FromJson(const QJsonObject& in) override
@@ -233,6 +261,7 @@ public:
         SetFontPath(in["fontPath"].toString());
         SetAssetPath(in["assetPath"].toString());
         SetAlignment(static_cast<AnchorFlags>(in["alignment"].toInt(static_cast<int>((int)Anchor::LEFT | (int)Anchor::TOP))));
+        SetHasBackground(in["hasBackground"].toBool(false));
     }
 
 
@@ -245,6 +274,7 @@ private:
     QString fontPath;
     QString assetPath;
     AnchorFlags alignment;
+    bool hasBackground;
 
 };
 

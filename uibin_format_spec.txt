@@ -241,6 +241,7 @@ usage guidance for game engine implementors.
   fontPath      string   ""            Asset key for a custom font file (TTF/OTF)
   assetPath     string   ""            Secondary/logical asset reference
   alignment     int      5             Text alignment flags (see Anchor Flags)
+  hasBackground bool     false         If true, render a drop shadow behind the text
 
   Engine usage:
     - If fontPath is non-empty, load the font from the asset table.
@@ -253,6 +254,10 @@ usage guidance for game engine implementors.
         TOP (0x04)       = top-aligned (default)
         BOTTOM (0x08)    = bottom-aligned
         CENTER_Y (0x20)  = vertically centered
+    - If hasBackground is true, draw the text a second time first at an
+      offset of max(1, pixelSize/16) pixels in both X and Y, in black with
+      alpha 160 (0xA0), to produce a drop-shadow effect. Then draw the
+      normal text on top in the configured color.
 
 
 --------------------------------------------------------------------------------
