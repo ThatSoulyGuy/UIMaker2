@@ -1,0 +1,302 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>UIMaker2</class>
+ <widget class="QMainWindow" name="UIMaker2">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1096</width>
+    <height>628</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>UIMaker2</string>
+  </property>
+  <property name="windowIcon">
+   <iconset>
+    <normaloff>C:/Users/bkmcm/Documents/Models/UIMakerIcon.png</normaloff>C:/Users/bkmcm/Documents/Models/UIMakerIcon.png</iconset>
+  </property>
+  <widget class="QWidget" name="Grid">
+   <layout class="QGridLayout" name="gridLayout">
+    <item row="0" column="0">
+     <widget class="QGraphicsView" name="graphicsView"/>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="MenuBar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1096</width>
+     <height>20</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="MenuFile">
+    <property name="title">
+     <string>File</string>
+    </property>
+    <addaction name="ActionNew"/>
+    <addaction name="ActionLoad"/>
+    <addaction name="separator"/>
+    <addaction name="ActionExport"/>
+    <addaction name="ActionBake"/>
+   </widget>
+   <widget class="QMenu" name="MenuEdit">
+    <property name="title">
+     <string>Edit</string>
+    </property>
+    <addaction name="ActionAddImage"/>
+    <addaction name="ActionAddButton"/>
+    <addaction name="ActionAddText"/>
+    <addaction name="ActionAddStackLayout"/>
+    <addaction name="ActionAddGridLayout"/>
+    <addaction name="ActionAddScrollBox"/>
+    <addaction name="ActionAddPanel"/>
+    <addaction name="ActionAddProgressBar"/>
+    <addaction name="ActionAddToggle"/>
+    <addaction name="ActionAddDropdown"/>
+    <addaction name="ActionAddTextInput"/>
+    <addaction name="ActionAddIcon"/>
+    <addaction name="ActionAddSprite"/>
+    <addaction name="ActionAddTooltip"/>
+    <addaction name="ActionAddModal"/>
+    <addaction name="ActionAddTabContainer"/>
+    <addaction name="ActionAddRadialMenu"/>
+    <addaction name="ActionAddMinimap"/>
+    <addaction name="ActionAddDragSlot"/>
+    <addaction name="ActionAddListRepeater"/>
+    <addaction name="separator"/>
+    <addaction name="ActionCopy"/>
+    <addaction name="ActionPaste"/>
+    <addaction name="ActionCut"/>
+    <addaction name="ActionDuplicate"/>
+    <addaction name="separator"/>
+    <addaction name="ActionUndo_2"/>
+    <addaction name="ActionRedo_2"/>
+    <addaction name="separator"/>
+    <addaction name="ActionDelete"/>
+   </widget>
+   <addaction name="MenuFile"/>
+   <addaction name="MenuEdit"/>
+  </widget>
+  <widget class="QDockWidget" name="ObjectHierarchy">
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="windowTitle">
+    <string>Object Hierarchy</string>
+   </property>
+   <attribute name="dockWidgetArea">
+    <number>1</number>
+   </attribute>
+   <widget class="QWidget" name="ObjectHierarchyContents"/>
+  </widget>
+  <widget class="QDockWidget" name="PropertyEditor">
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
+   </property>
+   <property name="windowTitle">
+    <string>Property Editor</string>
+   </property>
+   <attribute name="dockWidgetArea">
+    <number>2</number>
+   </attribute>
+   <widget class="QWidget" name="PropertyEditorContents"/>
+  </widget>
+  <action name="ActionNew">
+   <property name="text">
+    <string>New...</string>
+   </property>
+  </action>
+  <action name="ActionLoad">
+   <property name="text">
+    <string>Load...</string>
+   </property>
+  </action>
+  <action name="actionProperties">
+   <property name="text">
+    <string>Properties</string>
+   </property>
+  </action>
+  <action name="ActionMove">
+   <property name="text">
+    <string>Move</string>
+   </property>
+  </action>
+  <action name="ActionScale">
+   <property name="text">
+    <string>Scale</string>
+   </property>
+  </action>
+  <action name="ActionRotate">
+   <property name="text">
+    <string>Rotate</string>
+   </property>
+  </action>
+  <action name="ActionUndo">
+   <property name="text">
+    <string>Undo</string>
+   </property>
+  </action>
+  <action name="ActionRedo">
+   <property name="text">
+    <string>Redo</string>
+   </property>
+  </action>
+  <action name="ActionAddImage">
+   <property name="text">
+    <string>Add Image...</string>
+   </property>
+  </action>
+  <action name="ActionAddButton">
+   <property name="text">
+    <string>Add Button...</string>
+   </property>
+  </action>
+  <action name="ActionAddText">
+   <property name="text">
+    <string>Add Text</string>
+   </property>
+  </action>
+  <action name="ActionExport">
+   <property name="text">
+    <string>Export...</string>
+   </property>
+  </action>
+  <action name="ActionBake">
+   <property name="text">
+    <string>Bake (.uibin)...</string>
+   </property>
+  </action>
+  <action name="ActionCopy">
+   <property name="text">
+    <string>Copy</string>
+   </property>
+  </action>
+  <action name="ActionPaste">
+   <property name="text">
+    <string>Paste</string>
+   </property>
+  </action>
+  <action name="ActionCut">
+   <property name="text">
+    <string>Cut</string>
+   </property>
+  </action>
+  <action name="ActionDuplicate">
+   <property name="text">
+    <string>Duplicate</string>
+   </property>
+  </action>
+  <action name="ActionUndo_2">
+   <property name="text">
+    <string>Undo</string>
+   </property>
+  </action>
+  <action name="ActionRedo_2">
+   <property name="text">
+    <string>Redo</string>
+   </property>
+  </action>
+  <action name="ActionDelete">
+   <property name="text">
+    <string>Delete</string>
+   </property>
+  </action>
+  <action name="ActionAddStackLayout">
+   <property name="text">
+    <string>Add Stack Layout</string>
+   </property>
+  </action>
+  <action name="ActionAddGridLayout">
+   <property name="text">
+    <string>Add Grid Layout</string>
+   </property>
+  </action>
+  <action name="ActionAddScrollBox">
+   <property name="text">
+    <string>Add Scroll Box</string>
+   </property>
+  </action>
+  <action name="ActionAddPanel">
+   <property name="text">
+    <string>Add Panel</string>
+   </property>
+  </action>
+  <action name="ActionAddProgressBar">
+   <property name="text">
+    <string>Add Progress Bar</string>
+   </property>
+  </action>
+  <action name="ActionAddToggle">
+   <property name="text">
+    <string>Add Toggle</string>
+   </property>
+  </action>
+  <action name="ActionAddDropdown">
+   <property name="text">
+    <string>Add Dropdown</string>
+   </property>
+  </action>
+  <action name="ActionAddTextInput">
+   <property name="text">
+    <string>Add Text Input</string>
+   </property>
+  </action>
+  <action name="ActionAddIcon">
+   <property name="text">
+    <string>Add Icon</string>
+   </property>
+  </action>
+  <action name="ActionAddSprite">
+   <property name="text">
+    <string>Add Sprite</string>
+   </property>
+  </action>
+  <action name="ActionAddTooltip">
+   <property name="text">
+    <string>Add Tooltip</string>
+   </property>
+  </action>
+  <action name="ActionAddModal">
+   <property name="text">
+    <string>Add Modal</string>
+   </property>
+  </action>
+  <action name="ActionAddTabContainer">
+   <property name="text">
+    <string>Add Tab Container</string>
+   </property>
+  </action>
+  <action name="ActionAddRadialMenu">
+   <property name="text">
+    <string>Add Radial Menu</string>
+   </property>
+  </action>
+  <action name="ActionAddMinimap">
+   <property name="text">
+    <string>Add Minimap</string>
+   </property>
+  </action>
+  <action name="ActionAddDragSlot">
+   <property name="text">
+    <string>Add Drag Slot</string>
+   </property>
+  </action>
+  <action name="ActionAddListRepeater">
+   <property name="text">
+    <string>Add List Repeater</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

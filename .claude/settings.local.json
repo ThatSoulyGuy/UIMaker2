@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(cmake --build:*)",
+      "Bash(del \"D:\\Qt\\Projects\\UIMaker2\\GIZMO_PLAN.md\")",
+      "Bash(mkdir:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

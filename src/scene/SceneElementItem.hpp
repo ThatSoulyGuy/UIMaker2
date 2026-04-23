@@ -1,0 +1,56 @@
+#ifndef SCENEELEMENTITEM_HPP
+#define SCENEELEMENTITEM_HPP
+
+#include <QGraphicsObject>
+#include <QPainter>
+
+class UiElement;
+
+class SceneElementItem : public QGraphicsObject
+{
+    Q_OBJECT
+
+public:
+
+    explicit SceneElementItem(UiElement* element);
+    ~SceneElementItem() override = default;
+
+    QRectF boundingRect() const override
+    {
+        return localRect;
+    }
+
+    void paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget) override;
+
+    UiElement* GetElement() const noexcept
+    {
+        return element;
+    }
+
+    void setPosFromComponent(const QPointF& p);
+    void setRotationFromComponent(double deg);
+
+protected:
+
+    QVariant itemChange(GraphicsItemChange change, const QVariant& value) override;
+
+public slots:
+
+    void RefreshFromComponents();
+
+private slots:
+
+    void OnComponentChanged();
+
+private:
+
+    UiElement* element;
+    QRectF localRect;
+    bool pendingRefresh = false;
+    bool inLayoutRefresh = false;
+
+    bool ignorePositionFeedback = false;
+    bool ignoreRotationFeedback = false;
+};
+
+#endif
