@@ -71,12 +71,60 @@ void SceneElementItem::RefreshFromComponents()
     for (auto* comp : comps)
         comp->Update(*this, newRect, parentRect);
 
+    // Apply anchor-based positioning using the FINAL rect size after all component Updates
+    // have settled. Doing this here (rather than inside TransformComponent::Update) ensures
+    // the anchor math agrees with itemChange::ItemPositionHasChanged, which always uses the
+    // committed localRect width/height. Otherwise layouts that overwrite rect after Transform
+    // runs would cause per-frame position drift while dragging.
+    if (auto* xform = element->GetComponent<TransformComponent>())
+    {
+        bool parentHasLayout = false;
+        if (auto* parentElement = qobject_cast<UiElement*>(element->parent()))
+        {
+            for (auto* comp : parentElement->GetComponents())
+            {
+                if (comp->IsLayout())
+                {
+                    parentHasLayout = true;
+                    break;
+                }
+            }
+        }
+
+        if (!parentHasLayout)
+        {
+            const QPointF pos = xform->GetPosition();
+            const auto anchors = xform->GetAnchors();
+            const double w = newRect.width();
+            const double h = newRect.height();
+
+            double x = pos.x();
+            double y = pos.y();
+
+            if (anchors.testFlag(Anchor::RIGHT))
+                x = parentRect.width() - w - pos.x();
+            else if (anchors.testFlag(Anchor::CENTER_X))
+                x = (parentRect.width() - w) * 0.5 + pos.x();
+
+            if (anchors.testFlag(Anchor::BOTTOM))
+                y = parentRect.height() - h - pos.y();
+            else if (anchors.testFlag(Anchor::CENTER_Y))
+                y = (parentRect.height() - h) * 0.5 + pos.y();
+
+            setPosFromComponent(parentRect.topLeft() + QPointF(x, y));
+        }
+
+        setTransformOriginPoint(newRect.center());
+        setRotationFromComponent(xform->GetRotationDegrees());
+    }
+
     if (newRect != localRect)
     {
         prepareGeometryChange();
         localRect = newRect;
 
-        // If parent has a layout component, trigger parent refresh so layout re-runs
+        // Upward cascade: if our parent owns a layout component, re-run the parent's layout
+        // so children get repositioned given our new size.
         if (!inLayoutRefresh)
         {
             if (auto* parentSEI = dynamic_cast<SceneElementItem*>(parentItem()))

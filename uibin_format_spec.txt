@@ -164,6 +164,56 @@ Used by:
 
 
 ================================================================================
+  Element Sizing & Positioning Model
+================================================================================
+
+Every element's geometry is resolved in a single ordered pass. Implement
+this exactly to match UIMaker2's output:
+
+  1. Start with a base rect from the Transform component:
+       - size = (scaleX, scaleY)
+       - if stretch has LEFT|RIGHT: width  = parentWidth  - 2*x
+       - if stretch has TOP|BOTTOM: height = parentHeight - 2*y
+       (a stretched axis clamps to a tiny positive minimum, never <= 0)
+
+  2. Apply the element's remaining components in ascending update order.
+     The component that carries content/layout MAY overwrite the rect
+     size computed in step 1:
+       - Visual components size the rect to their intrinsic content
+         (e.g. Text/Button to the measured text box, Image/Icon/Sprite
+         to the source/frame size, Toggle/Dropdown/TextInput/Tooltip/
+         ListRepeater/RadialMenu/DragSlot to their drawn extents).
+         scaleX/scaleY are NOT used by these.
+       - StackLayout / GridLayout overwrite the rect to the size needed
+         to contain their children plus padding. scaleX/scaleY unused.
+       - ScrollBox keeps the step-1 size on its SCROLL axis and fits the
+         cross axis to its children.
+       - Slot overwrites the rect to its parent's rect (minus the tab
+         bar inset for a TabContainer master).
+       - Panel / no extra component: the step-1 rect is the final size.
+
+  3. With the FINAL rect size now known, position the element:
+       - If the element's parent owns a layout component, the parent
+         positions this element (see Layout Components). This element's
+         own x/y/anchors/stretch are ignored for positioning.
+       - Otherwise apply anchors against the FINAL size:
+           LEFT     : localX = x
+           RIGHT    : localX = parentWidth  - finalWidth  - x
+           CENTER_X : localX = (parentWidth  - finalWidth)/2  + x
+           TOP      : localY = y
+           BOTTOM   : localY = parentHeight - finalHeight - y
+           CENTER_Y : localY = (parentHeight - finalHeight)/2 + y
+         final position = parentTopLeft + (localX, localY)
+
+  4. Apply rotationDegrees about the center of the FINAL rect.
+
+The critical rule: anchoring and rotation always use the size produced
+AFTER content/layout sizing in step 2 - never the raw scaleX/scaleY -
+so a centered or right/bottom-anchored Text, Button, or layout container
+stays correctly aligned as its content (and therefore its size) changes.
+
+
+================================================================================
   Component Reference
 ================================================================================
 
@@ -186,22 +236,48 @@ usage guidance for game engine implementors.
   ----------------  -------  --------  ----------------------------------------
   x                 double   0.0       X position offset in pixels
   y                 double   0.0       Y position offset in pixels
-  scaleX            double   100.0     Width of the element in pixels
-  scaleY            double   100.0     Height of the element in pixels
+  scaleX            double   100.0     BASE width in pixels (may be overridden)
+  scaleY            double   100.0     BASE height in pixels (may be overridden)
   rotationDegrees   double   0.0       Rotation around element center (degrees)
   anchors           int      5         Anchor flags bitmask (see above)
   stretch           int      0         Stretch flags bitmask (see above)
 
+  IMPORTANT - effective size vs. scaleX/scaleY:
+    scaleX/scaleY is only the element's BASE size. The element's FINAL
+    rendered size is resolved by applying its components in order (see
+    "Element Sizing & Positioning Model" below). Visual components
+    (Text, Image, Button, Icon, Sprite, Toggle, Tooltip, Dropdown,
+    TextInput, ListRepeater, RadialMenu, DragSlot) size the element to
+    their own intrinsic content and ignore scaleX/scaleY. Layout
+    components (StackLayout, GridLayout) size the element to fit their
+    children plus padding and ignore scaleX/scaleY. ScrollBox honours
+    scaleX/scaleY ONLY on its scroll axis. A Slot is sized to its
+    parent's rect. Only "plain" elements (Transform + Panel, or Transform
+    alone) actually use scaleX/scaleY directly as their size.
+
   Engine usage:
-    - Use (x, y) as the element's position relative to its parent.
-    - Use (scaleX, scaleY) as the element's width and height.
-    - Apply rotationDegrees as a rotation around the element's center.
-    - Anchors determine how the element is positioned relative to its
-      parent rect (e.g. LEFT|TOP = top-left origin, CENTER_X|CENTER_Y =
-      centered). Implement responsive layout by repositioning the element
-      when the parent resizes.
-    - Stretch flags determine whether the element expands to fill the
-      parent axis (LEFT|RIGHT = fill width, TOP|BOTTOM = fill height).
+    - Use (x, y) as the element's position offset relative to its parent.
+    - Determine the element's effective (final) size first; only then
+      apply position, anchoring, and rotation.
+    - Apply rotationDegrees as a rotation about the element's center,
+      where "center" is the center of the FINAL rect (not the scaleX/
+      scaleY rect).
+    - Anchors are evaluated against the FINAL size, not scaleX/scaleY:
+        x = parentLeft + xOffset                         (LEFT, default)
+        x = parentLeft + parentW - finalW - xOffset      (RIGHT)
+        x = parentLeft + (parentW - finalW)/2 + xOffset  (CENTER_X)
+      and analogously for y with TOP/BOTTOM/CENTER_Y. Recompute when the
+      parent resizes so anchoring stays responsive.
+    - Stretch flags make the element fill the parent axis (LEFT|RIGHT =
+      fill width, TOP|BOTTOM = fill height): the stretched axis size
+      becomes parentExtent - 2*offset on that axis. Stretch contributes
+      to the BASE size and is therefore overridden by any visual/layout
+      component (it only survives on a plain element or on ScrollBox's
+      scroll axis).
+    - If the element's parent owns a layout component (StackLayout,
+      GridLayout, ScrollBox), this element's own x/y/anchors/stretch are
+      IGNORED for positioning - the parent layout positions it instead.
+      The Transform still supplies the base size that the layout measures.
 
 
 --------------------------------------------------------------------------------
@@ -728,6 +804,15 @@ Layout components do not render visible content themselves. They arrange
 their element's children automatically. In the authoring tool, they render
 a faint dashed outline for editor visibility only; game engines should NOT
 render any visual for these components.
+
+A layout component OWNS the placement of its element's direct children:
+each child's own Transform x/y, anchors, and stretch are ignored while
+its parent has a layout component. The child's Transform still provides
+the base size the layout measures (subject to the child's own content/
+layout sizing per the Sizing & Positioning Model). Engines must run the
+layout algorithm below to position the children; do not also apply the
+child's anchors on top, or it will be double-positioned. Child positions
+are expressed relative to the layout element's top-left.
 
 
 --------------------------------------------------------------------------------

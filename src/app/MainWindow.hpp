@@ -49,6 +49,7 @@ private:
     void AttachScene(QGraphicsScene* scene);
 
     UiElement* CurrentElement() const;
+    QList<UiElement*> SelectedElements() const;
 
     void DoCopy();
     void DoPaste();

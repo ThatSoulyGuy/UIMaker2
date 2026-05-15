@@ -7,6 +7,7 @@
 #include "scene/SceneDocument.hpp"
 #include "scene/SceneElementItem.hpp"
 #include "components/TransformComponent.hpp"
+#include "input/TransformInputHandler.hpp"
 
 class GizmoRenderPass : public RenderPass
 {
@@ -46,20 +47,23 @@ public:
         if (!scene)
             return;
 
-        auto selected = scene->selectedItems();
+        EditorContext mctx = ctx;
+        QList<SceneElementItem*> selectedTop = TransformInputHandler::GetTopLevelSelectedItems(mctx);
 
-        if (selected.isEmpty())
+        if (selectedTop.isEmpty())
             return;
 
-        auto* item = selected.first();
-        QRectF sceneBounds = item->sceneBoundingRect();
+        const bool isGroup = selectedTop.size() > 1;
+        const QRectF sceneBounds = isGroup
+            ? TransformInputHandler::ComputeUnionSceneBounds(selectedTop)
+            : selectedTop.first()->sceneBoundingRect();
 
         double rotation = 0.0;
         QPointF scale(1.0, 1.0);
 
-        if (auto* se = dynamic_cast<SceneElementItem*>(item))
+        if (!isGroup)
         {
-            if (auto* xform = se->GetElement()->GetComponent<TransformComponent>())
+            if (auto* xform = selectedTop.first()->GetElement()->GetComponent<TransformComponent>())
             {
                 rotation = xform->GetRotationDegrees();
                 scale = xform->GetScale();

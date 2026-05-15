@@ -25,6 +25,7 @@ public:
     explicit PropertyEditorPanel(QWidget* parent = nullptr);
 
     void SetTarget(UiElement* element);
+    void SetTargets(const QList<UiElement*>& elements);
 
 signals:
 
@@ -33,7 +34,8 @@ signals:
 private:
 
     void Rebuild();
-    QWidget* EditorForProperty(QObject* object, const QMetaProperty& prop);
+    QWidget* EditorForProperty(QObject* object, const QMetaProperty& prop, bool mixed = false);
+    void ApplyPropertyChange(QObject* primary, const QByteArray& propName, const QVariant& value);
 
 private slots:
 
@@ -42,6 +44,7 @@ private slots:
 private:
 
     UiElement* target;
+    QList<UiElement*> targets;
     QScrollArea* scrollArea;
     QWidget* container;
     QVBoxLayout* layout;

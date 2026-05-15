@@ -2,6 +2,7 @@
 #define TRANSFORMINPUTHANDLER_HPP
 
 #include <QGraphicsItem>
+#include <QList>
 
 #include "input/InputHandler.hpp"
 #include "gizmos/GizmoManager.hpp"
@@ -26,14 +27,28 @@ public:
     QString GetActiveHandleId() const override;
     QString GetUndoActionName() const override;
 
+    static QList<SceneElementItem*> GetTopLevelSelectedItems(EditorContext& ctx);
+    static QRectF ComputeUnionSceneBounds(const QList<SceneElementItem*>& items);
+
 private:
+
+    struct ItemStartState
+    {
+        SceneElementItem* item = nullptr;
+        TransformComponent* xform = nullptr;
+        QPointF startItemPos;
+        QPointF startPosition;
+        QPointF startSceneCenter;
+        double startRotation = 0.0;
+        QPointF startScale;
+    };
 
     SceneElementItem* GetSelectedItem(EditorContext& ctx) const;
     TransformComponent* GetTransformComponent(SceneElementItem* item) const;
     QByteArray CaptureState(EditorContext& ctx) const;
 
-    void ApplyTransform(SceneElementItem* item, TransformComponent* xform, const QPointF& scenePos, const QPointF& sceneDelta);
-    void ApplyScale(SceneElementItem* item, TransformComponent* xform, const QPointF& scenePos, const QPointF& sceneDelta);
+    void ApplyTransform(const QPointF& scenePos, const QPointF& sceneDelta);
+    void ApplyScale(const ItemStartState& state, const QPointF& scenePos, const QPointF& sceneDelta);
 
     GizmoManager* m_gizmoManager = nullptr;
 
@@ -43,11 +58,10 @@ private:
     QPoint m_startViewPos;
     QPointF m_startScenePos;
     QPointF m_itemCenter;
-    QPointF m_startItemPos;
-    double m_startRotation = 0.0;
-    QPointF m_startScale;
     QRectF m_startRect;
     QByteArray m_startJson;
+
+    QList<ItemStartState> m_startStates;
 
 };
 

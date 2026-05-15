@@ -71,7 +71,7 @@ public:
     UiElement* CreateDragSlotElement(const QString& name, UiElement* parent = nullptr);
     UiElement* CreateListRepeaterElement(const QString& name, UiElement* parent = nullptr);
 
-    UiElement* CreateElementFromJson(const QJsonObject& obj, UiElement* parent);
+    UiElement* CreateElementFromJson(const QJsonObject& obj, UiElement* parent, bool preserveIds = false);
     void DeleteElement(UiElement* e);
 
     SceneElementItem* GetItem(UiElement* e) const
@@ -82,17 +82,22 @@ public:
     QByteArray ExportJson() const;
     bool LoadJson(const QByteArray& data);
 
+    QList<UiElement*> GetSelectedElements() const;
+    UiElement* GetPrimarySelection() const;
+
 signals:
 
-    void SelectionChanged(UiElement*);
+    void SelectionChanged(const QList<UiElement*>& selected);
 
 public slots:
 
     void SetSelected(UiElement* e);
+    void SetSelectedElements(const QList<UiElement*>& elements);
 
 private slots:
 
     void OnStructureChanged();
+    void OnSceneSelectionChanged();
 
 private:
 
@@ -106,6 +111,7 @@ private:
     QGraphicsScene* scene;
     QGraphicsRectItem* rootRect;
     QMap<UiElement*, SceneElementItem*> items;
+    bool m_syncingSelection = false;
 };
 
 #endif

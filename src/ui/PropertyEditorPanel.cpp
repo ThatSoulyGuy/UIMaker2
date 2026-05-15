@@ -9,6 +9,50 @@
 #include <QPointer>
 #include <QTimer>
 #include <QFile>
+#include <QSet>
+
+static Component* ComponentOfKind(UiElement* el, const QString& kind)
+{
+    if (!el)
+        return nullptr;
+
+    for (Component* c : el->GetComponents())
+    {
+        if (c->GetTypeName() == kind)
+            return c;
+    }
+
+    return nullptr;
+}
+
+// True if the named property has the same value across the same-kind component of every
+// selected element. A property that is uniform needs no "mixed" annotation.
+static bool PropertyIsUniform(const QList<UiElement*>& targets, const QString& kind, const char* propName)
+{
+    bool haveFirst = false;
+    QVariant first;
+
+    for (UiElement* el : targets)
+    {
+        Component* c = ComponentOfKind(el, kind);
+        if (!c)
+            continue;
+
+        const QVariant v = c->property(propName);
+
+        if (!haveFirst)
+        {
+            first = v;
+            haveFirst = true;
+        }
+        else if (v != first)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 PropertyEditorPanel::PropertyEditorPanel(QWidget* parent) : QWidget(parent), target(nullptr)
 {
@@ -46,28 +90,78 @@ PropertyEditorPanel::PropertyEditorPanel(QWidget* parent) : QWidget(parent), tar
 
 void PropertyEditorPanel::SetTarget(UiElement* element)
 {
-    if (target)
-    {
-        QObject::disconnect(target, nullptr, this, nullptr);
+    SetTargets(element ? QList<UiElement*>{ element } : QList<UiElement*>{});
+}
 
-        for (Component* comp : target->GetComponents())
+void PropertyEditorPanel::SetTargets(const QList<UiElement*>& elements)
+{
+    // Disconnect from all prior targets.
+    for (UiElement* prior : targets)
+    {
+        if (!prior)
+            continue;
+
+        QObject::disconnect(prior, nullptr, this, nullptr);
+
+        for (Component* comp : prior->GetComponents())
             QObject::disconnect(comp, nullptr, this, nullptr);
     }
 
-    target = element;
+    targets = elements;
+    target = targets.isEmpty() ? nullptr : targets.last();
 
-    if (target)
+    for (UiElement* el : targets)
     {
-        QObject::connect(target, &UiElement::ComponentListChanged, this, [this](UiElement*) { Rebuild(); });
-        QObject::connect(target, &QObject::destroyed, this, [this]()
+        if (!el)
+            continue;
+
+        QObject::connect(el, &UiElement::ComponentListChanged, this, [this](UiElement*) { Rebuild(); });
+        QObject::connect(el, &QObject::destroyed, this, [this, el]()
         {
-            target = nullptr;
+            targets.removeAll(el);
+            if (target == el)
+                target = targets.isEmpty() ? nullptr : targets.last();
             pendingRebuild = false;
             Rebuild();
         });
     }
 
     Rebuild();
+}
+
+void PropertyEditorPanel::ApplyPropertyChange(QObject* primary, const QByteArray& propName, const QVariant& value)
+{
+    if (!primary)
+        return;
+
+    primary->setProperty(propName.constData(), value);
+
+    // Broadcast to every other selected element's same-kind component, so a property
+    // edit in the panel updates the whole multiselection in lock-step.
+    auto* primaryComp = qobject_cast<Component*>(primary);
+    if (!primaryComp)
+        return;
+
+    auto* primaryOwner = qobject_cast<UiElement*>(primaryComp->parent());
+    const QString kind = primaryComp->GetTypeName();
+
+    for (UiElement* el : targets)
+    {
+        if (!el || el == primaryOwner)
+            continue;
+
+        for (Component* otherComp : el->GetComponents())
+        {
+            if (otherComp == primaryComp)
+                continue;
+
+            if (otherComp->GetTypeName() == kind)
+            {
+                otherComp->setProperty(propName.constData(), value);
+                break;
+            }
+        }
+    }
 }
 
 void PropertyEditorPanel::OnComponentChanged()
@@ -88,7 +182,7 @@ void PropertyEditorPanel::OnComponentChanged()
     QTimer::singleShot(0, this, [this](){ Rebuild(); });
 }
 
-QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProperty& prop)
+QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProperty& prop, bool mixed)
 {
     const QString name = QString::fromLatin1(prop.name());
 
@@ -112,7 +206,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             if (!obj)
                 return;
             suppressRebuild = true;
-            obj->setProperty(prop.name(), index);
+            ApplyPropertyChange(obj, prop.name(),index);
             suppressRebuild = false;
             emit PropertyEdited();
         });
@@ -133,7 +227,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             if (!obj)
                 return;
             suppressRebuild = true;
-            obj->setProperty(prop.name(), index);
+            ApplyPropertyChange(obj, prop.name(),index);
             suppressRebuild = false;
             emit PropertyEdited();
         });
@@ -148,7 +242,16 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
 #endif
     {
         auto* cb = new QCheckBox();
-        cb->setChecked(object->property(prop.name()).toBool());
+        if (mixed)
+        {
+            cb->setTristate(true);
+            cb->setCheckState(Qt::PartiallyChecked);
+            cb->setText(QStringLiteral("mixed"));
+        }
+        else
+        {
+            cb->setChecked(object->property(prop.name()).toBool());
+        }
 
         QPointer<QObject> obj = object;
         QObject::connect(cb, &QCheckBox::toggled, this, [this, obj, prop](bool checked)
@@ -156,7 +259,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             if (!obj)
                 return;
             suppressRebuild = true;
-            obj->setProperty(prop.name(), checked);
+            ApplyPropertyChange(obj, prop.name(),checked);
             suppressRebuild = false;
             emit PropertyEdited();
         });
@@ -172,10 +275,21 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
     {
         auto* box = new QDoubleSpinBox();
 
-        box->setRange(-100000.0, 100000.0);
         box->setDecimals(3);
-        box->setValue(object->property(prop.name()).toDouble());
 
+        if (mixed)
+        {
+            // Park at an out-of-range sentinel so the box shows "mixed" with no number.
+            // Typing any real value moves off the sentinel and commits normally.
+            box->setRange(-100001.0, 100000.0);
+            box->setSpecialValueText(QStringLiteral("mixed"));
+            box->setValue(box->minimum());
+        }
+        else
+        {
+            box->setRange(-100000.0, 100000.0);
+            box->setValue(object->property(prop.name()).toDouble());
+        }
 
         QPointer<QObject> obj = object;
         QObject::connect(box, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, obj, prop](double v)
@@ -183,7 +297,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             if (!obj)
                 return;
             suppressRebuild = true;
-            obj->setProperty(prop.name(), v);
+            ApplyPropertyChange(obj, prop.name(),v);
             suppressRebuild = false;
             emit PropertyEdited();
         });
@@ -201,8 +315,17 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
     {
         auto* box = new QSpinBox();
 
-        box->setRange(0, 4096);
-        box->setValue(object->property(prop.name()).toInt());
+        if (mixed)
+        {
+            box->setRange(-1, 4096);
+            box->setSpecialValueText(QStringLiteral("mixed"));
+            box->setValue(box->minimum());
+        }
+        else
+        {
+            box->setRange(0, 4096);
+            box->setValue(object->property(prop.name()).toInt());
+        }
 
         QPointer<QObject> obj = object;
 
@@ -212,7 +335,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
                 return;
 
             suppressRebuild = true;
-            obj->setProperty(prop.name(), v);
+            ApplyPropertyChange(obj, prop.name(),v);
             suppressRebuild = false;
 
             emit PropertyEdited();
@@ -227,7 +350,16 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         auto* h = new QHBoxLayout();
         h->setContentsMargins(0,0,0,0);
 
-        auto* edit = new QLineEdit(object->property(prop.name()).toString());
+        auto* edit = new QLineEdit(mixed ? QString() : object->property(prop.name()).toString());
+        if (mixed)
+        {
+            edit->setPlaceholderText(QStringLiteral("mixed"));
+            edit->setProperty("mixedUntouched", true);
+            QObject::connect(edit, &QLineEdit::textEdited, edit, [edit](const QString&)
+            {
+                edit->setProperty("mixedUntouched", false);
+            });
+        }
         auto* browse = new QPushButton("...");
         browse->setFixedWidth(30);
 
@@ -238,6 +370,11 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             if (!obj)
                 return;
 
+            // Don't broadcast an empty value to the whole selection just because the
+            // user tabbed through an untouched "mixed" path field.
+            if (edit->property("mixedUntouched").toBool() && edit->text().isEmpty())
+                return;
+
             QString v = edit->text().trimmed();
 
             if (!v.isEmpty() && !QFile::exists(v))
@@ -246,7 +383,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
                 edit->setStyleSheet(QString());
 
             suppressRebuild = true;
-            obj->setProperty(prop.name(), v);
+            ApplyPropertyChange(obj, prop.name(),v);
             suppressRebuild = false;
 
             emit PropertyEdited();
@@ -276,7 +413,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
                 edit->setStyleSheet(QString());
 
                 suppressRebuild = true;
-                obj->setProperty(prop.name(), path);
+                ApplyPropertyChange(obj, prop.name(),path);
                 suppressRebuild = false;
 
                 emit PropertyEdited();
@@ -298,7 +435,9 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
 #endif
         )
     {
-        auto* edit = new QLineEdit(object->property(prop.name()).toString());
+        auto* edit = new QLineEdit(mixed ? QString() : object->property(prop.name()).toString());
+        if (mixed)
+            edit->setPlaceholderText(QStringLiteral("mixed"));
 
         QPointer<QObject> obj = object;
 
@@ -307,7 +446,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             if (!obj)
                 return;
             suppressRebuild = true;
-            obj->setProperty(prop.name(), v);
+            ApplyPropertyChange(obj, prop.name(),v);
             suppressRebuild = false;
             emit PropertyEdited();
         });
@@ -377,7 +516,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             else if (index == 2)
                 v |= static_cast<int>(Anchor::RIGHT);
 
-            obj->setProperty(prop.name(), v);
+            ApplyPropertyChange(obj, prop.name(),v);
             suppressRebuild = false;
             emit PropertyEdited();
         });
@@ -399,7 +538,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             else if (index == 2)
                 v |= static_cast<int>(Anchor::BOTTOM);
 
-            obj->setProperty(prop.name(), v);
+            ApplyPropertyChange(obj, prop.name(),v);
             suppressRebuild = false;
             emit PropertyEdited();
         });
@@ -464,7 +603,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
                 v |= static_cast<int>(Anchor::BOTTOM);
             }
 
-            obj->setProperty(prop.name(), v);
+            ApplyPropertyChange(obj, prop.name(),v);
             suppressRebuild = false;
 
             emit PropertyEdited();
@@ -495,7 +634,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             if (!obj || index < 0 || index >= e.keyCount())
                 return;
             suppressRebuild = true;
-            obj->setProperty(prop.name(), e.value(index));
+            ApplyPropertyChange(obj, prop.name(),e.value(index));
             suppressRebuild = false;
             emit PropertyEdited();
         });
@@ -538,7 +677,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
                 else
                     v &= ~value;
 
-                obj->setProperty(prop.name(), v);
+                ApplyPropertyChange(obj, prop.name(),v);
                 suppressRebuild = false;
 
                 emit PropertyEdited();
@@ -567,36 +706,56 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         auto* x = new QDoubleSpinBox();
         auto* y = new QDoubleSpinBox();
 
-        x->setRange(-100000.0, 100000.0);
-        y->setRange(-100000.0, 100000.0);
         x->setDecimals(3);
         y->setDecimals(3);
 
-        auto p = object->property(prop.name()).toPointF();
-        x->setValue(p.x());
-        y->setValue(p.y());
+        const QPointF p = object->property(prop.name()).toPointF();
+
+        if (mixed)
+        {
+            x->setRange(-100001.0, 100000.0);
+            y->setRange(-100001.0, 100000.0);
+            x->setSpecialValueText(QStringLiteral("mixed"));
+            y->setSpecialValueText(QStringLiteral("mixed"));
+            x->setValue(x->minimum());
+            y->setValue(y->minimum());
+        }
+        else
+        {
+            x->setRange(-100000.0, 100000.0);
+            y->setRange(-100000.0, 100000.0);
+            x->setValue(p.x());
+            y->setValue(p.y());
+        }
 
         QPointer<QObject> obj = object;
 
-        QObject::connect(x, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, obj, prop, y](double xv)
+        // When an axis is still parked on the "mixed" sentinel, fall back to the primary
+        // element's value for that axis so editing one axis doesn't clobber the other.
+        auto axisVal = [](QDoubleSpinBox* b, double fallback) -> double
+        {
+            return b->value() <= b->minimum() ? fallback : b->value();
+        };
+
+        QObject::connect(x, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, obj, prop, y, p, axisVal](double xv)
         {
             if (!obj)
                 return;
 
             suppressRebuild = true;
-            obj->setProperty(prop.name(), QPointF(xv, y->value()));
+            ApplyPropertyChange(obj, prop.name(), QPointF(xv, axisVal(y, p.y())));
             suppressRebuild = false;
 
             emit PropertyEdited();
         });
 
-        QObject::connect(y, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, obj, prop, x](double yv)
+        QObject::connect(y, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, obj, prop, x, p, axisVal](double yv)
         {
             if (!obj)
                 return;
 
             suppressRebuild = true;
-            obj->setProperty(prop.name(), QPointF(x->value(), yv));
+            ApplyPropertyChange(obj, prop.name(), QPointF(axisVal(x, p.x()), yv));
             suppressRebuild = false;
 
             emit PropertyEdited();
@@ -617,7 +776,9 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
 #endif
         )
     {
-        auto* button = new QPushButton(object->property(prop.name()).value<QColor>().name(QColor::HexArgb));
+        auto* button = new QPushButton(mixed
+            ? QStringLiteral("mixed")
+            : object->property(prop.name()).value<QColor>().name(QColor::HexArgb));
 
         QPointer<QObject> obj = object;
         QPointer<QPushButton> btn = button;
@@ -632,7 +793,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
 
             if (c.isValid())
             {
-                obj->setProperty(prop.name(), c);
+                ApplyPropertyChange(obj, prop.name(),c);
 
                 if (btn)
                     btn->setText(c.name(QColor::HexArgb));
@@ -667,6 +828,92 @@ void PropertyEditorPanel::Rebuild()
 
     if (!target)
         return;
+
+    const bool isMulti = targets.size() > 1;
+
+    if (isMulti)
+    {
+        auto* header = new QLabel(QStringLiteral("%1 elements selected — edits apply to all").arg(targets.size()));
+        header->setWordWrap(true);
+        header->setStyleSheet("QLabel { color: #6cb6ff; padding: 4px 2px; font-weight: bold; }");
+        layout->addWidget(header);
+
+        auto* nameRow = new QWidget();
+        auto* nameLayout = new QHBoxLayout();
+        nameLayout->setContentsMargins(0,0,0,0);
+
+        auto* nameEdit = new QLineEdit(QStringLiteral("<multiple>"));
+        nameEdit->setReadOnly(true);
+        nameEdit->setStyleSheet("QLineEdit { color: #aaaaaa; font-style: italic; }");
+
+        nameLayout->addWidget(new QLabel("Name"));
+        nameLayout->addWidget(nameEdit);
+        nameRow->setLayout(nameLayout);
+        layout->addWidget(nameRow);
+
+        // Only show component kinds present on EVERY selected element, so an edit
+        // broadcast through ApplyPropertyChange lands on all of them.
+        QStringList commonKinds;
+        for (Component* comp : target->GetComponents())
+        {
+            const QString kind = comp->GetTypeName();
+            bool inAll = true;
+
+            for (UiElement* el : targets)
+            {
+                if (!ComponentOfKind(el, kind))
+                {
+                    inAll = false;
+                    break;
+                }
+            }
+
+            if (inAll)
+                commonKinds.append(kind);
+        }
+
+        for (Component* comp : target->GetComponents())
+        {
+            const QString kind = comp->GetTypeName();
+            if (!commonKinds.contains(kind))
+                continue;
+
+            auto* group = new QGroupBox(kind);
+            auto* form = new QFormLayout();
+
+            const QMetaObject* mo = comp->metaObject();
+
+            for (int i = mo->propertyOffset(); i < mo->propertyCount(); ++i)
+            {
+                QMetaProperty prop = mo->property(i);
+
+                if (!prop.isWritable() || !prop.isReadable())
+                    continue;
+
+                const bool mixed = !PropertyIsUniform(targets, kind, prop.name());
+
+                QWidget* editor = EditorForProperty(comp, prop, mixed);
+
+                QString label = QString::fromLatin1(prop.name());
+                if (mixed && editor)
+                    editor->setToolTip(QStringLiteral("Values differ across the selection. Editing sets all to the same value."));
+
+                form->addRow(label, editor);
+            }
+
+            group->setLayout(form);
+            layout->addWidget(group);
+
+            for (UiElement* el : targets)
+            {
+                if (Component* c = ComponentOfKind(el, kind))
+                    QObject::connect(c, &Component::ComponentChanged, this, &PropertyEditorPanel::OnComponentChanged, Qt::UniqueConnection);
+            }
+        }
+
+        layout->addStretch(1);
+        return;
+    }
 
     if (target->IsSlot())
     {

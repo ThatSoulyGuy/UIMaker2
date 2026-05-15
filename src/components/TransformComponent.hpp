@@ -146,7 +146,7 @@ public:
         SetPosition(QPointF(sane(x), sane(y)));
 
         SetRotationDegrees(in["rotationDegrees"].toDouble(0.0));
-        SetScale(QPointF(in["scaleX"].toDouble(1.0), in["scaleY"].toDouble(1.0)));
+        SetScale(QPointF(in["scaleX"].toDouble(100.0), in["scaleY"].toDouble(100.0)));
         SetAnchors(static_cast<AnchorFlags>(in["anchors"].toInt(static_cast<int>((int)Anchor::LEFT | (int)Anchor::TOP))));
         SetStretch(static_cast<AnchorFlags>(in["stretch"].toInt(0)));
     }

@@ -1,9 +1,13 @@
 #include "scene/SceneDocument.hpp"
 #include <QBrush>
+#include <QSet>
+#include <QSignalBlocker>
 
 SceneDocument::SceneDocument(QObject* parent) : QObject(parent), root(new UiElement("Root")), scene(new QGraphicsScene(this)), rootRect(nullptr)
 {
     scene->setSceneRect(QRectF(0.0, 0.0, 1920.0, 1080.0));
+
+    QObject::connect(scene, &QGraphicsScene::selectionChanged, this, &SceneDocument::OnSceneSelectionChanged);
 
     {
         const int tileSize = 32;
@@ -60,6 +64,11 @@ SceneElementItem* SceneDocument::CreateItemFor(UiElement* e)
 
     scene->addItem(item);
     items.insert(e, item);
+
+    // Re-run anchor/stretch math now that the item has a real parent / scene attachment.
+    // The first refresh ran inside the SEI constructor with no parent and no scene, so any
+    // formula touching parentRect.width/height/topLeft saw a zero rect.
+    item->RefreshFromComponents();
 
     QObject::connect(e, &UiElement::StructureChanged, this, &SceneDocument::OnStructureChanged);
 
@@ -437,6 +446,7 @@ bool SceneDocument::LoadJson(const QByteArray& data)
 
     QJsonObject rootObj = doc.object();
     root->SetName(rootObj["name"].toString("Root"));
+    root->SetId(QUuid::fromString(rootObj["id"].toString()));
 
     for (const QJsonValue& v : rootObj["components"].toArray())
     {
@@ -447,7 +457,7 @@ bool SceneDocument::LoadJson(const QByteArray& data)
     }
 
     for (const QJsonValue& v : rootObj["children"].toArray())
-        CreateElementFromJson(v.toObject(), root);
+        CreateElementFromJson(v.toObject(), root, /*preserveIds=*/true);
 
     QObject::connect(scene, &QGraphicsScene::sceneRectChanged, this, [this](const QRectF& r){ if (rootRect) rootRect->setRect(r); });
 
@@ -496,16 +506,72 @@ void SceneDocument::DeleteElement(UiElement* e)
 
 void SceneDocument::SetSelected(UiElement* e)
 {
-    for (auto it = items.begin(); it != items.end(); ++it)
-        it.value()->setSelected(it.key() == e);
-
-    emit SelectionChanged(e);
+    SetSelectedElements(e ? QList<UiElement*>{ e } : QList<UiElement*>{});
 }
 
-UiElement* SceneDocument::CreateElementFromJson(const QJsonObject& obj, UiElement* parent)
+void SceneDocument::SetSelectedElements(const QList<UiElement*>& elements)
+{
+    if (m_syncingSelection)
+        return;
+
+    m_syncingSelection = true;
+
+    const QSet<UiElement*> selectedSet(elements.begin(), elements.end());
+
+    // Block scene::selectionChanged emission so the intermediate state during the
+    // setSelected loop doesn't trigger downstream UI sync until the final state lands.
+    {
+        QSignalBlocker blocker(scene);
+
+        for (auto it = items.begin(); it != items.end(); ++it)
+        {
+            const bool shouldSelect = selectedSet.contains(it.key());
+            if (it.value()->isSelected() != shouldSelect)
+                it.value()->setSelected(shouldSelect);
+        }
+    }
+
+    m_syncingSelection = false;
+
+    emit SelectionChanged(GetSelectedElements());
+}
+
+QList<UiElement*> SceneDocument::GetSelectedElements() const
+{
+    QList<UiElement*> result;
+
+    for (auto* qitem : scene->selectedItems())
+    {
+        if (auto* sei = dynamic_cast<SceneElementItem*>(qitem))
+            result.append(sei->GetElement());
+    }
+
+    return result;
+}
+
+UiElement* SceneDocument::GetPrimarySelection() const
+{
+    const auto sel = GetSelectedElements();
+    return sel.isEmpty() ? nullptr : sel.last();
+}
+
+void SceneDocument::OnSceneSelectionChanged()
+{
+    if (m_syncingSelection)
+        return;
+
+    emit SelectionChanged(GetSelectedElements());
+}
+
+UiElement* SceneDocument::CreateElementFromJson(const QJsonObject& obj, UiElement* parent, bool preserveIds)
 {
     QString name = obj["name"].toString("Element");
     UiElement* e = parent->AddChild(name);
+
+    // Preserve the id only on load/undo (so selection survives a JSON round-trip).
+    // Paste/Duplicate intentionally pass preserveIds=false so copies get fresh ids.
+    if (preserveIds)
+        e->SetId(QUuid::fromString(obj["id"].toString()));
 
     QJsonArray comps = obj["components"].toArray();
 
@@ -524,7 +590,7 @@ UiElement* SceneDocument::CreateElementFromJson(const QJsonObject& obj, UiElemen
     for (const QJsonValue& v : children)
     {
         QJsonObject childObj = v.toObject();
-        CreateElementFromJson(childObj, e);
+        CreateElementFromJson(childObj, e, preserveIds);
     }
 
     if (auto* tc = e->GetComponent<TabContainerComponent>())

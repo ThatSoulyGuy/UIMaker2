@@ -5,11 +5,14 @@
 #include <QMimeData>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QUndoCommand>
 #include <QUndoStack>
 #include <QGridLayout>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QItemSelection>
+#include <QSignalBlocker>
 #include "scene/SceneElementItem.hpp"
 #include "scene/SceneExporter.hpp"
 #include "app/MainWindow.hpp"
@@ -93,14 +96,39 @@ UiElement* MainWindow::CurrentElement() const
     return hierarchyModel->GetElementFromIndex(hierarchySelection->currentIndex());
 }
 
+QList<UiElement*> MainWindow::SelectedElements() const
+{
+    QList<UiElement*> result;
+
+    if (!hierarchyModel || !hierarchySelection)
+        return result;
+
+    for (const QModelIndex& idx : hierarchySelection->selectedIndexes())
+    {
+        if (auto* e = hierarchyModel->GetElementFromIndex(idx))
+        {
+            if (!result.contains(e))
+                result.append(e);
+        }
+    }
+
+    return result;
+}
+
 void MainWindow::ApplySceneJson(const QByteArray& bytes)
 {
     if (!document)
         return;
 
-    // Save current selection name before LoadJson destroys elements
-    UiElement* current = CurrentElement();
-    QString selectedName = current ? current->GetName() : QString();
+    // Save the selected element ids before LoadJson destroys the elements. Ids are
+    // preserved across the JSON round-trip (see SceneDocument::CreateElementFromJson),
+    // so the entire multiselection can be restored, not just one element by name.
+    QList<QUuid> selectedIds;
+    for (UiElement* e : document->GetSelectedElements())
+    {
+        if (e)
+            selectedIds.append(e->GetId());
+    }
 
     if (!document->LoadJson(bytes))
         return;
@@ -118,26 +146,29 @@ void MainWindow::ApplySceneJson(const QByteArray& bytes)
     hierarchyView->setSelectionModel(hierarchySelection);
     WireHierarchySignals();
 
-    // Restore selection by name
-    UiElement* restored = nullptr;
-    if (!selectedName.isEmpty())
+    // Restore selection by id.
+    QList<UiElement*> restored;
+    if (!selectedIds.isEmpty())
     {
-        for (auto* e : document->GetRoot()->findChildren<UiElement*>())
+        const QList<UiElement*> all = document->GetRoot()->findChildren<UiElement*>();
+        for (const QUuid& id : selectedIds)
         {
-            if (e->GetName() == selectedName)
+            for (UiElement* e : all)
             {
-                restored = e;
-                break;
+                if (e->GetId() == id)
+                {
+                    restored.append(e);
+                    break;
+                }
             }
         }
     }
 
-    if (restored)
+    if (!restored.isEmpty())
     {
-        auto idx = hierarchyModel->GetIndexFromElement(restored);
-        hierarchySelection->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-        propertyPanel->SetTarget(restored);
-        document->SetSelected(restored);
+        // SceneDocument::SelectionChanged listener mirrors this back to the tree view
+        // and the property panel, so no need to touch them directly here.
+        document->SetSelectedElements(restored);
     }
     else
     {
@@ -167,6 +198,7 @@ void MainWindow::BuildHierarchyDock()
     hierarchyView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
     hierarchyView->setDragDropMode(QAbstractItemView::InternalMove);
     hierarchyView->setDefaultDropAction(Qt::MoveAction);
+    hierarchyView->setSelectionMode(QAbstractItemView::ExtendedSelection);
 
     hierarchyModel = new EntityTreeModel(document->GetRoot(), this);
     hierarchySelection = new QItemSelectionModel(hierarchyModel, this);
@@ -176,9 +208,6 @@ void MainWindow::BuildHierarchyDock()
     WireHierarchySignals();
     layout->addWidget(hierarchyView);
     contents->setLayout(layout);
-
-    connect(hierarchySelection, &QItemSelectionModel::currentChanged, this, [this](const QModelIndex& current, const QModelIndex&){ UiElement* e = hierarchyModel->GetElementFromIndex(current); document->SetSelected(e); propertyPanel->SetTarget(e); });
-    connect(hierarchyModel, &EntityTreeModel::HierarchyChanged, this, [this](){ hierarchyView->expandAll(); });
 }
 
 void MainWindow::BuildPropertyDock()
@@ -460,12 +489,11 @@ void MainWindow::WireHierarchySignals()
     disconnect(hierarchySelection, nullptr, this, nullptr);
     disconnect(hierarchyModel, nullptr, this, nullptr);
 
-    connect(hierarchySelection, &QItemSelectionModel::currentChanged, this, [this](const QModelIndex& current, const QModelIndex&)
+    connect(hierarchySelection, &QItemSelectionModel::selectionChanged, this, [this](const QItemSelection&, const QItemSelection&)
     {
-        UiElement* e = hierarchyModel->GetElementFromIndex(current);
-
-        document->SetSelected(e);
-        propertyPanel->SetTarget(e);
+        // Push the tree's selection into the document; the SceneDocument::SelectionChanged
+        // listener takes care of mirroring back to the property panel and viewport.
+        document->SetSelectedElements(SelectedElements());
     });
 
     connect(hierarchyModel, &EntityTreeModel::HierarchyChanged, this, [this]()
@@ -482,24 +510,28 @@ void MainWindow::AttachScene(QGraphicsScene* scene)
 
     if (!scene) return;
 
-    sceneSelectionConnection = connect(scene, &QGraphicsScene::selectionChanged, this, [this]()
+    sceneSelectionConnection = connect(document, &SceneDocument::SelectionChanged, this,
+        [this](const QList<UiElement*>& selected)
     {
-        auto items = document->GetScene()->selectedItems();
-
         m_viewport->viewport()->update();
 
-        if (items.isEmpty())
-            return;
-
-        if (auto* se = static_cast<SceneElementItem*>(items.first()))
+        // Mirror the document's selection into the tree view without re-triggering the
+        // hierarchy -> document handler.
+        QSignalBlocker blocker(hierarchySelection);
+        QItemSelection itemSel;
+        for (UiElement* e : selected)
         {
-            UiElement* e = se->GetElement();
-
-            auto idx = hierarchyModel->GetIndexFromElement(e);
-
-            hierarchySelection->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-            propertyPanel->SetTarget(e);
+            const QModelIndex idx = hierarchyModel->GetIndexFromElement(e);
+            if (idx.isValid())
+                itemSel.select(idx, idx);
         }
+        hierarchySelection->select(itemSel, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+
+        if (!selected.isEmpty())
+            hierarchySelection->setCurrentIndex(hierarchyModel->GetIndexFromElement(selected.last()),
+                                                QItemSelectionModel::Current | QItemSelectionModel::Rows);
+
+        propertyPanel->SetTargets(selected);
     });
 
     // Fit view once on initial attach (new document / file load)
@@ -510,21 +542,64 @@ void MainWindow::AttachScene(QGraphicsScene* scene)
     });
 }
 
+static QList<UiElement*> FilterDeletable(const QList<UiElement*>& src, UiElement* root)
+{
+    // Remove root, slots, and any element that is a descendant of another selected
+    // element (parent will recursively delete it).
+    QList<UiElement*> out;
+
+    for (UiElement* e : src)
+    {
+        if (!e || e == root || e->IsSlot())
+            continue;
+
+        bool hasSelectedAncestor = false;
+        for (UiElement* other : src)
+        {
+            if (other == e || !other)
+                continue;
+
+            for (auto* p = qobject_cast<UiElement*>(e->parent()); p != nullptr; p = qobject_cast<UiElement*>(p->parent()))
+            {
+                if (p == other)
+                {
+                    hasSelectedAncestor = true;
+                    break;
+                }
+            }
+
+            if (hasSelectedAncestor)
+                break;
+        }
+
+        if (!hasSelectedAncestor)
+            out.append(e);
+    }
+
+    return out;
+}
+
 void MainWindow::DoCopy()
 {
-    UiElement* e = CurrentElement();
+    const QList<UiElement*> selected = SelectedElements();
 
-    if (!e)
+    if (selected.isEmpty())
         return;
 
-    QJsonObject obj;
-    e->ToJson(obj);
+    QJsonArray arr;
+    for (UiElement* e : selected)
+    {
+        if (!e)
+            continue;
+        QJsonObject obj;
+        e->ToJson(obj);
+        arr.append(obj);
+    }
 
-    QJsonDocument doc(obj);
+    QJsonDocument doc(arr);
     QByteArray bytes = doc.toJson(QJsonDocument::Compact);
 
     auto* mime = new QMimeData();
-
     mime->setData(kElementMime, bytes);
     mime->setText(QString::fromUtf8(bytes));
 
@@ -550,7 +625,7 @@ void MainWindow::DoPaste()
     QJsonParseError err{};
     QJsonDocument doc = QJsonDocument::fromJson(bytes, &err);
 
-    if (err.error != QJsonParseError::NoError || !doc.isObject())
+    if (err.error != QJsonParseError::NoError)
         return;
 
     UiElement* current = CurrentElement();
@@ -559,9 +634,24 @@ void MainWindow::DoPaste()
     if (!parent)
         parent = document->GetRoot();
 
+    QJsonArray arr;
+    if (doc.isArray())
+        arr = doc.array();
+    else if (doc.isObject())
+        arr.append(doc.object());
+    else
+        return;
+
+    if (arr.isEmpty())
+        return;
+
     const QByteArray before = document->ExportJson();
 
-    document->CreateElementFromJson(doc.object(), parent);
+    for (const QJsonValue& v : arr)
+    {
+        if (v.isObject())
+            document->CreateElementFromJson(v.toObject(), parent);
+    }
 
     const QByteArray after = document->ExportJson();
 
@@ -571,15 +661,16 @@ void MainWindow::DoPaste()
 
 void MainWindow::DoCut()
 {
-    UiElement* e = CurrentElement();
+    const QList<UiElement*> targets = FilterDeletable(SelectedElements(), document->GetRoot());
 
-    if (!e || e == document->GetRoot() || e->IsSlot())
+    if (targets.isEmpty())
         return;
 
     DoCopy();
 
     const QByteArray before = document->ExportJson();
-    document->DeleteElement(e);
+    for (UiElement* e : targets)
+        document->DeleteElement(e);
     const QByteArray after  = document->ExportJson();
 
     ApplySceneJson(before);
@@ -589,28 +680,31 @@ void MainWindow::DoCut()
 
 void MainWindow::DoDuplicate()
 {
-    UiElement* e = CurrentElement();
+    const QList<UiElement*> targets = FilterDeletable(SelectedElements(), document->GetRoot());
 
-    if (!e || e == document->GetRoot() || e->IsSlot())
+    if (targets.isEmpty())
         return;
-
-    QJsonObject obj; e->ToJson(obj);
 
     const QByteArray before = document->ExportJson();
 
-    UiElement* parent = qobject_cast<UiElement*>(e->parent());
-
-    if (!parent)
-        parent = document->GetRoot();
-
-    UiElement* dup = document->CreateElementFromJson(obj, parent);
-
-    if (dup)
+    for (UiElement* e : targets)
     {
-        if (auto* t = dup->GetComponent<TransformComponent>())
-            t->SetPosition(t->GetPosition() + QPointF(20.0, 20.0));
+        QJsonObject obj;
+        e->ToJson(obj);
 
-        dup->SetName(e->GetName() + " Copy");
+        UiElement* parent = qobject_cast<UiElement*>(e->parent());
+        if (!parent)
+            parent = document->GetRoot();
+
+        UiElement* dup = document->CreateElementFromJson(obj, parent);
+
+        if (dup)
+        {
+            if (auto* t = dup->GetComponent<TransformComponent>())
+                t->SetPosition(t->GetPosition() + QPointF(20.0, 20.0));
+
+            dup->SetName(e->GetName() + " Copy");
+        }
     }
 
     const QByteArray after = document->ExportJson();
@@ -621,13 +715,14 @@ void MainWindow::DoDuplicate()
 
 void MainWindow::DoDelete()
 {
-    UiElement* e = CurrentElement();
+    const QList<UiElement*> targets = FilterDeletable(SelectedElements(), document->GetRoot());
 
-    if (!e || e == document->GetRoot() || e->IsSlot())
+    if (targets.isEmpty())
         return;
 
     const QByteArray before = document->ExportJson();
-    document->DeleteElement(e);
+    for (UiElement* e : targets)
+        document->DeleteElement(e);
     const QByteArray after  = document->ExportJson();
 
     ApplySceneJson(before);

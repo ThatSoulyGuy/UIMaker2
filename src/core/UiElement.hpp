@@ -24,6 +24,12 @@ public:
         return id;
     }
 
+    void SetId(const QUuid& value)
+    {
+        if (!value.isNull())
+            id = value;
+    }
+
     QString GetName() const noexcept
     {
         return name;
