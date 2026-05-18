@@ -41,7 +41,8 @@ namespace uibin
         TAG_DOUBLE    = 4,   // f64 LE (IEEE-754)
         TAG_STRING    = 5,   // u32 string id
         TAG_COLOR     = 6,   // u32 0xAARRGGBB
-        TAG_ASSET_REF = 7    // u32 asset index (kNoAsset = none)
+        TAG_ASSET_REF = 7,   // u32 asset index (kNoAsset = none)
+        TAG_POINT     = 8    // f64 x, f64 y
     };
 
     // ----- Writer: append-only, little-endian -----------------------------

@@ -254,16 +254,12 @@ trust the header offsets rather than assume adjacency.
       The component's visual content comes entirely from the resolved asset;
       the original editor path is not recoverable and is not needed.
 
-    * POINT: a 2D vector (x, y). Used for Transform.position and
-      Transform.scale (scale carries width/height in pixels, not a factor).
-      Apply as the named property's two components.
-
   How the writer chose the tag (for reference): a property whose name ends in
   "Path" becomes ASSET_REF; "assetDomain"/"assetRegistryValue" are NOT emitted
   as fields (they are folded into the asset record and reapplied as above);
   everything else maps by type - bool->BOOL, integral->INT32/INT64,
-  floating-point->DOUBLE, enum/flags->INT32, QColor->COLOR, point->POINT,
-  string->STRING, anything else stringifiable->STRING, otherwise NONE.
+  floating-point->DOUBLE, enum/flags->INT32, QColor->COLOR, string->STRING,
+  anything else stringifiable->STRING, otherwise NONE.
 
 
 --------------------------------------------------------------------------------

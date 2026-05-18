@@ -41,6 +41,8 @@ Thumbs.db
 CMakeLists.txt.user*
 .qtcreator/
 
+CMakeLists.txt.user
+
 # xemacs temporary files
 *.flc
 

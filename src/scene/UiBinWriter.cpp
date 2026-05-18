@@ -10,6 +10,8 @@
 #include <QVector>
 #include <QUuid>
 #include <QColor>
+#include <QPoint>
+#include <QPointF>
 #include <QMetaObject>
 #include <QMetaProperty>
 #include <QFileInfo>
@@ -151,6 +153,18 @@ namespace
                     w.U8(TAG_COLOR);
                     w.U32(quint32(v.value<QColor>().rgba())); // 0xAARRGGBB
                     break;
+                case QMetaType::QPointF:
+                {
+                    const QPointF pt = v.toPointF();
+                    w.U8(TAG_POINT); w.F64(pt.x()); w.F64(pt.y());
+                    break;
+                }
+                case QMetaType::QPoint:
+                {
+                    const QPoint pt = v.toPoint();
+                    w.U8(TAG_POINT); w.F64(pt.x()); w.F64(pt.y());
+                    break;
+                }
                 case QMetaType::QString:
                     w.U8(TAG_STRING); w.U32(bake.Intern(v.toString())); break;
                 default:

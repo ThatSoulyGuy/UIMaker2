@@ -7,6 +7,7 @@
 #include <QVector>
 #include <QUuid>
 #include <QColor>
+#include <QPointF>
 
 using namespace uibin;
 
@@ -53,6 +54,7 @@ namespace
             case TAG_DOUBLE: value = r.F64();                 break;
             case TAG_STRING: value = ctx.Str(r.U32());        break;
             case TAG_COLOR:  value = QColor::fromRgba(QRgb(r.U32())); break;
+            case TAG_POINT:  { const double x = r.F64(); const double y = r.F64(); value = QPointF(x, y); break; }
             case TAG_ASSET_REF: assetRef = r.U32();           break;
             default:
                 // Unknown tag: cannot know its width — abandon this component
