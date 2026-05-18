@@ -8,6 +8,7 @@
 #include <QPen>
 
 #include "core/Component.hpp"
+#include "core/AssetContext.hpp"
 
 class DragSlotComponent : public Component
 {
@@ -20,7 +21,8 @@ class DragSlotComponent : public Component
     Q_PROPERTY(double cornerRadius READ GetCornerRadius WRITE SetCornerRadius NOTIFY ComponentChanged)
     Q_PROPERTY(bool isEmpty READ IsEmpty WRITE SetEmpty NOTIFY ComponentChanged)
     Q_PROPERTY(QString iconPath READ GetIconPath WRITE SetIconPath NOTIFY ComponentChanged)
-    Q_PROPERTY(QString assetPath READ GetAssetPath WRITE SetAssetPath NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetDomain READ GetAssetDomain WRITE SetAssetDomain NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetRegistryValue READ GetAssetRegistryValue WRITE SetAssetRegistryValue NOTIFY ComponentChanged)
 
 public:
 
@@ -118,15 +120,18 @@ public:
         m_iconPixmap = QPixmap();
         if (!m_iconPath.isEmpty())
         {
-            QPixmap loaded(m_iconPath);
+            QPixmap loaded(AssetContext::Resolve(m_iconPath));
             if (!loaded.isNull())
                 m_iconPixmap = loaded;
         }
         NotifyChanged();
     }
 
-    QString GetAssetPath() const noexcept { return m_assetPath; }
-    void SetAssetPath(const QString& v) { if (m_assetPath == v) return; m_assetPath = v; NotifyChanged(); }
+    QString GetAssetDomain() const noexcept { return m_assetDomain; }
+    void SetAssetDomain(const QString& v) { if (m_assetDomain == v) return; m_assetDomain = v; NotifyChanged(); }
+
+    QString GetAssetRegistryValue() const noexcept { return m_assetRegistryValue; }
+    void SetAssetRegistryValue(const QString& v) { if (m_assetRegistryValue == v) return; m_assetRegistryValue = v; NotifyChanged(); }
 
     void ToJson(QJsonObject& out) const override
     {
@@ -138,7 +143,8 @@ public:
         out["cornerRadius"] = m_cornerRadius;
         out["isEmpty"] = m_isEmpty;
         out["iconPath"] = m_iconPath;
-        out["assetPath"] = m_assetPath;
+        out["assetDomain"] = m_assetDomain;
+        out["assetRegistryValue"] = m_assetRegistryValue;
     }
 
     void FromJson(const QJsonObject& in) override
@@ -150,7 +156,8 @@ public:
         SetCornerRadius(in["cornerRadius"].toDouble(4.0));
         SetEmpty(in["isEmpty"].toBool(true));
         SetIconPath(in["iconPath"].toString());
-        SetAssetPath(in["assetPath"].toString());
+        SetAssetDomain(in["assetDomain"].toString());
+        SetAssetRegistryValue(in["assetRegistryValue"].toString());
     }
 
 private:
@@ -162,7 +169,8 @@ private:
     double m_cornerRadius;
     bool m_isEmpty;
     QString m_iconPath;
-    QString m_assetPath;
+    QString m_assetDomain;
+    QString m_assetRegistryValue;
     QPixmap m_iconPixmap;
 };
 

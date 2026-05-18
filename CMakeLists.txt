@@ -25,6 +25,7 @@ qt_add_executable(UIMaker2
     src/core/Anchor.hpp
     src/core/Component.hpp
     src/core/UiElement.hpp
+    src/core/AssetContext.hpp
 
     # Components
     src/components/TransformComponent.hpp
@@ -79,6 +80,11 @@ qt_add_executable(UIMaker2
     src/scene/SceneElementItem.cpp
     src/scene/SceneExporter.hpp
     src/scene/SceneExporter.cpp
+    src/scene/UiBinCommon.hpp
+    src/scene/UiBinWriter.hpp
+    src/scene/UiBinWriter.cpp
+    src/scene/UiBinReader.hpp
+    src/scene/UiBinReader.cpp
 
     # UI
     src/ui/EntityTreeModel.hpp

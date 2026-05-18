@@ -62,7 +62,12 @@ SceneElementItem* SceneDocument::CreateItemFor(UiElement* e)
             item->setParentItem(parentItem);
     }
 
-    scene->addItem(item);
+    // setParentItem() on a parent that is already in the scene implicitly adds
+    // this item to that scene. Only add it explicitly when it has no such
+    // parent, otherwise QGraphicsScene warns "item has already been added".
+    if (item->scene() != scene)
+        scene->addItem(item);
+
     items.insert(e, item);
 
     // Re-run anchor/stretch math now that the item has a real parent / scene attachment.

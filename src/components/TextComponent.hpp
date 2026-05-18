@@ -10,6 +10,7 @@
 #include <QPen>
 
 #include "core/Component.hpp"
+#include "core/AssetContext.hpp"
 #include "core/Anchor.hpp"
 
 class TextComponent : public Component
@@ -20,7 +21,8 @@ class TextComponent : public Component
     Q_PROPERTY(int pixelSize READ GetPixelSize WRITE SetPixelSize NOTIFY ComponentChanged)
     Q_PROPERTY(QColor color READ GetColor WRITE SetColor NOTIFY ComponentChanged)
     Q_PROPERTY(QString fontPath READ GetFontPath WRITE SetFontPath NOTIFY ComponentChanged)
-    Q_PROPERTY(QString assetPath READ GetAssetPath WRITE SetAssetPath NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetDomain READ GetAssetDomain WRITE SetAssetDomain NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetRegistryValue READ GetAssetRegistryValue WRITE SetAssetRegistryValue NOTIFY ComponentChanged)
     Q_PROPERTY(AnchorFlags alignment READ GetAlignment WRITE SetAlignment NOTIFY ComponentChanged)
     Q_PROPERTY(bool hasBackground READ GetHasBackground WRITE SetHasBackground NOTIFY ComponentChanged)
 
@@ -196,7 +198,7 @@ public:
 
         if (!fontPath.isEmpty())
         {
-            int id = QFontDatabase::addApplicationFont(fontPath);
+            int id = QFontDatabase::addApplicationFont(AssetContext::Resolve(fontPath));
 
             if (id != -1)
             {
@@ -224,17 +226,32 @@ public:
         NotifyChanged();
     }
 
-    QString GetAssetPath() const noexcept
+    QString GetAssetDomain() const noexcept
     {
-        return assetPath;
+        return assetDomain;
     }
 
-    void SetAssetPath(const QString& v)
+    void SetAssetDomain(const QString& v)
     {
-        if (assetPath == v)
+        if (assetDomain == v)
             return;
 
-        assetPath = v;
+        assetDomain = v;
+
+        NotifyChanged();
+    }
+
+    QString GetAssetRegistryValue() const noexcept
+    {
+        return assetRegistryValue;
+    }
+
+    void SetAssetRegistryValue(const QString& v)
+    {
+        if (assetRegistryValue == v)
+            return;
+
+        assetRegistryValue = v;
 
         NotifyChanged();
     }
@@ -247,7 +264,8 @@ public:
         out["pixelSize"] = pixelSize;
         out["color"] = color.name(QColor::HexArgb);
         out["fontPath"] = fontPath;
-        out["assetPath"] = assetPath;
+        out["assetDomain"] = assetDomain;
+        out["assetRegistryValue"] = assetRegistryValue;
         out["alignment"] = static_cast<int>(alignment);
         out["hasBackground"] = hasBackground;
     }
@@ -259,7 +277,8 @@ public:
         SetPixelSize(in["pixelSize"].toInt(pixelSize));
         SetColor(QColor(in["color"].toString("#FFFFFFFF")));
         SetFontPath(in["fontPath"].toString());
-        SetAssetPath(in["assetPath"].toString());
+        SetAssetDomain(in["assetDomain"].toString());
+        SetAssetRegistryValue(in["assetRegistryValue"].toString());
         SetAlignment(static_cast<AnchorFlags>(in["alignment"].toInt(static_cast<int>((int)Anchor::LEFT | (int)Anchor::TOP))));
         SetHasBackground(in["hasBackground"].toBool(false));
     }
@@ -272,7 +291,8 @@ private:
     int pixelSize;
     QColor color;
     QString fontPath;
-    QString assetPath;
+    QString assetDomain;
+    QString assetRegistryValue;
     AnchorFlags alignment;
     bool hasBackground;
 

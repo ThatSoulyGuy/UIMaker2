@@ -1,5 +1,7 @@
 #include "ui/PropertyEditorPanel.hpp"
+#include "core/AssetContext.hpp"
 #include <QMetaProperty>
+#include <QMessageBox>
 #include <QApplication>
 #include <QLabel>
 #include <QGroupBox>
@@ -364,23 +366,41 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         browse->setFixedWidth(30);
 
         QPointer<QObject> obj = object;
+        // edit/browse are recreated whenever the panel rebuilds. The modal file
+        // dialogs below spin the event loop, so a refresh can free this row
+        // mid-callback; track the line edit through a QPointer and never touch
+        // it (directly or via markValidity) once it has died.
+        QPointer<QLineEdit> editp = edit;
 
-        QObject::connect(edit, &QLineEdit::editingFinished, this, [this, edit, obj, prop]()
+        // Paths are stored relative to scene.json. Flag anything absolute,
+        // escaping the project root via "..", or pointing at a file that does
+        // not resolve under the current project root.
+        auto markValidity = [](QLineEdit* e, const QString& v)
         {
-            if (!obj)
+            if (!e)
+                return;
+
+            const bool bad = !v.isEmpty()
+                             && (!AssetContext::IsValidRelative(v)
+                                 || !QFile::exists(AssetContext::Resolve(v)));
+
+            e->setStyleSheet(bad ? "QLineEdit { border: 1px solid #cc4444; }" : QString());
+        };
+
+        markValidity(edit, mixed ? QString() : object->property(prop.name()).toString());
+
+        QObject::connect(edit, &QLineEdit::editingFinished, this, [this, editp, obj, prop, markValidity]()
+        {
+            if (!obj || !editp)
                 return;
 
             // Don't broadcast an empty value to the whole selection just because the
             // user tabbed through an untouched "mixed" path field.
-            if (edit->property("mixedUntouched").toBool() && edit->text().isEmpty())
+            if (editp->property("mixedUntouched").toBool() && editp->text().isEmpty())
                 return;
 
-            QString v = edit->text().trimmed();
-
-            if (!v.isEmpty() && !QFile::exists(v))
-                edit->setStyleSheet("QLineEdit { border: 1px solid #cc4444; }");
-            else
-                edit->setStyleSheet(QString());
+            QString v = editp->text().trimmed();
+            markValidity(editp, v);
 
             suppressRebuild = true;
             ApplyPropertyChange(obj, prop.name(),v);
@@ -389,7 +409,7 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             emit PropertyEdited();
         });
 
-        QObject::connect(browse, &QPushButton::clicked, this, [this, edit, obj, prop, name]()
+        QObject::connect(browse, &QPushButton::clicked, this, [this, editp, obj, prop, name, markValidity]()
         {
             QString filter;
             QString title;
@@ -405,19 +425,51 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
                 title = "Choose Image";
             }
 
-            auto path = QFileDialog::getOpenFileName(nullptr, title, QString(), filter);
+            const QString src = QFileDialog::getOpenFileName(nullptr, title, QString(), filter);
 
-            if (!path.isEmpty() && obj)
+            if (src.isEmpty() || !obj)
+                return;
+
+            // Relative paths need a project root (the folder that will hold
+            // scene.json + assets/). Establish one on first use.
+            if (!AssetContext::HasBaseDir())
             {
-                edit->setText(path);
-                edit->setStyleSheet(QString());
+                const QString root = QFileDialog::getExistingDirectory(
+                    nullptr, "Choose Project Root (folder for scene.json + assets)");
 
-                suppressRebuild = true;
-                ApplyPropertyChange(obj, prop.name(),path);
-                suppressRebuild = false;
+                if (root.isEmpty())
+                    return;
 
-                emit PropertyEdited();
+                AssetContext::SetBaseDir(root);
+                emit ProjectRootChanged(root);
             }
+
+            const QString rel = AssetContext::ImportToAssets(src);
+
+            if (rel.isEmpty())
+            {
+                QMessageBox::warning(this, "Asset Import Failed",
+                    "Could not copy the selected file into the project's assets/ folder.");
+                return;
+            }
+
+            // The row may have been rebuilt while the dialog(s) were open; only
+            // touch the line edit if it is still alive. The property change is
+            // still applied via the (separately tracked) target object.
+            if (editp)
+            {
+                editp->setText(rel);
+                markValidity(editp, rel);
+            }
+
+            if (!obj)
+                return;
+
+            suppressRebuild = true;
+            ApplyPropertyChange(obj, prop.name(), rel);
+            suppressRebuild = false;
+
+            emit PropertyEdited();
         });
 
         h->addWidget(edit);

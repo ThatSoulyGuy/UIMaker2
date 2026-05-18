@@ -4,6 +4,7 @@
 #include <QGraphicsScene>
 #include <QMap>
 #include "core/UiElement.hpp"
+#include "core/AssetContext.hpp"
 #include "components/TransformComponent.hpp"
 #include "components/ImageComponent.hpp"
 #include "components/TextComponent.hpp"
@@ -46,6 +47,20 @@ public:
     QGraphicsScene* GetScene() const noexcept
     {
         return scene;
+    }
+
+    // Directory that contains this scene's scene.json. All imagePath/fontPath/
+    // iconPath values are relative to it. Setting it mirrors into AssetContext
+    // so components can resolve relative paths for preview.
+    QString GetBaseDir() const noexcept
+    {
+        return m_baseDir;
+    }
+
+    void SetBaseDir(const QString& dir)
+    {
+        m_baseDir = dir;
+        AssetContext::SetBaseDir(dir);
     }
 
     UiElement* CreateImageElement(const QString& name, UiElement* parent = nullptr);
@@ -111,6 +126,7 @@ private:
     QGraphicsScene* scene;
     QGraphicsRectItem* rootRect;
     QMap<UiElement*, SceneElementItem*> items;
+    QString m_baseDir;
     bool m_syncingSelection = false;
 };
 

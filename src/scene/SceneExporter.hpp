@@ -13,9 +13,12 @@ class SceneExporter
 {
 public:
 
+    // Writes scene.json (paths kept relative to the project root) and copies
+    // every referenced asset into folderPath, mirroring its relative location.
     static bool ExportToFolder(const SceneDocument* doc, const QString& folderPath);
+
+    // Bakes the scene into the custom binary .uibin v2 container.
     static bool BakeToUiBin(const SceneDocument* doc, const QString& filePath);
-    static QByteArray ResolveJsonPaths(const QByteArray& json, const QString& baseDir);
 
 private:
 

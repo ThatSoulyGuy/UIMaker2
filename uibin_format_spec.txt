@@ -1,905 +1,283 @@
 ================================================================================
-  .uibin File Format Specification  (Version 1)
+  .uibin File Format Specification  (Version 3)
 ================================================================================
 
-A .uibin file is a self-contained, binary-packed UI scene produced by UIMaker2's
-"Bake" command. It bundles the scene definition (JSON) together with every
-referenced asset (images, fonts) into a single file that can be loaded by a
-game engine at runtime without any external file dependencies.
+A .uibin file is a self-contained, binary-packed UI scene produced by
+UIMaker2's "Bake" command. It bundles the entire UI element hierarchy together
+with every referenced texture/font asset into one file that a game engine can
+load at runtime with zero external file dependencies.
 
-All multi-byte integers are unsigned 32-bit, big-endian. Fields are emitted
-contiguously with no padding or alignment; the asset table starts immediately
-after the last JSON byte, and each asset entry begins immediately after the
-previous asset's data.
+This document is both the byte-level reference AND a usage guide: each section
+gives the exact layout, explains what the part is for, and tells you how to
+consume it. If you are writing an engine-side loader, you can implement it
+top-to-bottom from this file alone.
+
 
 --------------------------------------------------------------------------------
-  Header
+  1. Design goals (why the format looks like this)
 --------------------------------------------------------------------------------
 
-  Offset  Size    Description
+  * Opaque and fixed-layout. It is deliberately NOT text/JSON-shaped and not
+    meant to be eyeballed. Every value is found by an explicit offset in the
+    header or by a length prefix - never by scanning for delimiters. This is
+    what makes loading a few memcpy-style reads instead of a parse.
+
+  * Little-endian everywhere. All multi-byte scalars are little-endian, which
+    is native on the target platforms, so reading an integer is a direct load
+    with no byte-swapping. There is no padding or alignment between fields.
+
+  * Strings interned once. Every repeated string (component type names,
+    property names, element names, asset identity) is stored a single time in
+    a string table and referenced by a 4-byte id. The tree itself contains no
+    text, only ids.
+
+  * Engine-facing asset identity is first-class. Each asset carries an
+    abstract (domain, registryValue) pair the engine can resolve through its
+    own asset registry, AND the raw baked bytes as a fallback. The editor's
+    authoring path (the relative imagePath/fontPath/iconPath) is intentionally
+    NOT in the file - it is a tooling concept with no runtime meaning.
+
+  * Forward-skippable. Components are length-prefixed so an older loader can
+    walk past a component type or field tag it does not understand instead of
+    failing.
+
+
+--------------------------------------------------------------------------------
+  2. How a runtime loads a .uibin (the whole procedure)
+--------------------------------------------------------------------------------
+
+  1. Read the 32-byte header. Verify magic == "UIB3" and version == 3. Reject
+     otherwise. Keep the four section offsets and three counts.
+  2. Seek to stringTableOffset. Read [stringCount] entries into an array
+     indexed by id (id 0 will be ""). This array is your decode dictionary.
+  3. Seek to assetTableOffset. Read [assetCount] records into an array indexed
+     by asset index. Resolve string ids to get each asset's domain/registry.
+     Either register the embedded bytes with your texture/font system now, or
+     keep them lazily and resolve on first use.
+  4. Seek to treeOffset. Decode exactly one Element (recursive, pre-order).
+     For each component, instantiate it by its type-name string, then apply
+     each field to the instance (see section 7).
+  5. The decoded Element tree is your live UI hierarchy.
+
+Sections never overlap and always appear in this order, but you should always
+trust the header offsets rather than assume adjacency.
+
+
+--------------------------------------------------------------------------------
+  3. Header  (fixed 32 bytes, at offset 0)
+--------------------------------------------------------------------------------
+
+  Offset  Size  Type    Description
+  ------  ----  ------  ------------------------------------------------------
+  0       4     char[4] Magic bytes: ASCII "UIB3"
+  4       2     u16     Format version (currently 3)
+  6       2     u16     Flags (currently 0; all bits reserved, must be 0)
+  8       4     u32     String table offset  (always 32)
+  12      4     u32     String count
+  16      4     u32     Asset table offset
+  20      4     u32     Asset count
+  24      4     u32     Element tree offset
+  28      4     u32     Total file size in bytes
+
+  What it's for: a self-describing directory of the file. Because every
+  section's start is here, a loader needs no preliminary scan.
+
+  How to use it: validate magic+version first. Earlier formats (v1's JSON
+  blob, v2's binary layout) must be rejected - v3 is not backward compatible
+  and a loader must not attempt a best-effort parse of a mismatched version.
+  Treat the offsets as authoritative. Use "Total file size" as a sanity check:
+  if it does not equal the actual file length the file is truncated/corrupt.
+
+
+--------------------------------------------------------------------------------
+  4. String table  (at stringTableOffset)
+--------------------------------------------------------------------------------
+
+  Repeated [String count] times, contiguously:
+
+  Size    Type    Description
   ------  ------  --------------------------------------------------------------
-  0       4       Magic bytes: ASCII "UIBN" (0x5549424E)
-  4       4       Format version (uint32, currently 1)
-  8       4       JSON data length in bytes (uint32) [jsonLen]
-  12      4       Asset count (uint32)               [assetCount]
+  4       u32     Byte length of the UTF-8 string  [len]
+  len     u8[len] UTF-8 bytes, no null terminator
+
+  What it's for: deduplication. The same property name ("imagePath") or
+  component type ("Image") occurs hundreds of times in a scene; storing it
+  once and referencing a 4-byte id keeps files small and decoding fast.
+
+  How to use it: read the whole table into an array once, BEFORE touching the
+  asset table or tree, because both reference strings by id. Ids are assigned
+  in order of first appearance starting at 0, and id 0 is, by contract, always
+  the empty string - so you can treat a 0 id as "" without a lookup.
+
 
 --------------------------------------------------------------------------------
-  JSON Section
+  5. Asset table  (at assetTableOffset)
 --------------------------------------------------------------------------------
 
-  Offset  Size      Description
-  ------  --------  ------------------------------------------------------------
-  16      jsonLen   UTF-8 encoded JSON string (compact, no trailing null)
+  Repeated [Asset count] times, contiguously:
 
-The JSON describes the UI element hierarchy. It is the same structure as the
-authoring .json format but with all file paths rewritten to relative asset keys
-(e.g. "assets/hero.png") that correspond to entries in the asset table below.
+  Size      Type      Description
+  ------    ------    ----------------------------------------------------------
+  4         u32       Domain string id           (engine-facing asset domain)
+  4         u32       Registry value string id   (engine-facing registry key)
+  4         u32       Raw asset data length      [dataLen]
+  dataLen   u8        Raw baked file bytes (PNG/JPG/TTF/OTF/...), no terminator
+
+  What it's for: this is the heart of the new asset model. An asset is NOT a
+  file path. It is an abstract identity - (domain, registryValue) - that means
+  something to your engine's asset registry, plus a self-contained copy of the
+  bytes so the file still works even if the registry has no entry.
+
+    - domain        : a namespace/category the engine understands, e.g.
+                      "ui", "items", "fonts". Opaque to the editor.
+    - registryValue : the key within that domain, e.g. "hero_portrait".
+                      Opaque to the editor.
+    - bytes         : the actual encoded image/font, decoded with your normal
+                      image/font loader.
+
+  Both are always present. dataLen may be 0 (the source file was missing at
+  bake time) but the identity strings are still emitted, so registry
+  resolution still works.
+
+  How to use it (recommended resolution order):
+
+      asset = assetTable[index]
+      domain   = strings[asset.domainId]
+      registry = strings[asset.registryId]
+      tex = engine.registry.tryResolve(domain, registry)   // preferred
+      if tex == null and asset.dataLen > 0:
+          tex = engine.decodeTexture(asset.bytes)            // fallback
+      // cache tex keyed by asset index so shared refs decode once
+
+  Assets are de-duplicated by (domain, registryValue, source) at bake time, so
+  two components pointing at the same image share one record and one decode.
+  The editor-side relative path is intentionally absent - do not look for it.
+
 
 --------------------------------------------------------------------------------
-  Asset Table
+  6. Element tree  (at treeOffset)
 --------------------------------------------------------------------------------
 
-Immediately after the JSON section. Repeated [assetCount] times:
+  Exactly one root Element, encoded pre-order (a node, then all its children).
+  An Element is:
 
-  Size    Description
-  ------  ------------------------------------------------------------------
-  4       Asset key length in bytes (uint32) [keyLen]
-  keyLen  Asset key string (UTF-8, e.g. "assets/hero.png")
-  4       Asset data length in bytes (uint32) [dataLen]
-  dataLen Raw asset file data (PNG, JPG, TTF, OTF, etc.)
+  Size    Type      Description
+  ------  ------    ----------------------------------------------------------
+  4       u32       Element name string id
+  16      u8[16]    Element UUID, raw RFC-4122 byte order
+  2       u16       Component count
+  ...               Component records (Component count of them)
+  4       u32       Child count
+  ...               Child Elements (Child count of them, recursive)
 
-The asset key matches the value used in the JSON section's path fields.
-To resolve an asset reference found in the JSON, look up the key in the
-asset table and use the corresponding raw data.
+  What it's for: the UI hierarchy. The UUID is stable across bakes so an
+  engine can keep references/bindings to a specific element.
 
-Asset key strings are UTF-8 bytes with no null terminator; their byte
-length is given by keyLen. Likewise asset data is dataLen raw bytes with
-no terminator, checksum, or alignment.
+  How to use it: decode recursively. Read the name and UUID, decode
+  [componentCount] components onto the node, then decode [childCount] child
+  Elements as children of this node. There is exactly one root; do not loop
+  for siblings at the top level.
 
-If a referenced source file could not be opened at bake time, the writer
-silently omits it from the asset table. The JSON in the file will still
-reference the missing key, so readers must cope with missing-entry lookups
-(draw a placeholder, log a warning, etc.). assetCount always matches the
-number of entries actually present in the table, which may be less than
-the number of distinct path references in the JSON.
 
 --------------------------------------------------------------------------------
-  Reading Pseudocode
+  7. Component record
 --------------------------------------------------------------------------------
 
-  file = open("scene.uibin", "rb")
+  Size       Type    Description
+  ------     ------  -----------------------------------------------------------
+  4          u32     Component type-name string id (e.g. "Image", "Transform")
+  4          u32     Payload length in bytes  [payloadLen]
+  payloadLen bytes   Payload (the items below)
 
-  magic   = file.read(4)           -- must be "UIBN"
-  version = read_uint32(file)      -- must be 1
-  jsonLen = read_uint32(file)
-  assetCount = read_uint32(file)
+  Payload:
+  2          u16     Field count
+  ...                Fields (Field count of them)
 
-  jsonData = file.read(jsonLen)
-  scene = json_parse(jsonData)
+  What it's for: payloadLen is a skip handle. It counts every byte after
+  itself (the field count plus all fields). A loader that does not recognise
+  the component type, or wants to ignore it, jumps payloadLen bytes and keeps
+  going - the format stays forward-compatible as new component types appear.
 
-  assets = {}
-  for i in 0 .. assetCount-1:
-      keyLen  = read_uint32(file)
-      key     = file.read(keyLen).decode("utf-8")
-      dataLen = read_uint32(file)
-      data    = file.read(dataLen)
-      assets[key] = data
+  How to use it:
 
-  -- Now resolve scene component paths:
-  -- For each component property ending in "Path",
-  -- look up its value in the assets table to get the raw bytes.
-  -- Load textures / fonts from those bytes.
+      typeName  = strings[typeNameId]
+      payloadEnd = cursor_after_payloadLen + payloadLen
+      comp = engine.createComponent(typeName)   // may be null if unknown
+      read u16 fieldCount
+      for each field: decode it; if comp != null, apply it (section 8)
+      seek(payloadEnd)   // ALWAYS, even on success - this re-syncs the stream
+
+  Always resync to payloadEnd after the fields. That single rule means one
+  malformed or unknown component cannot derail the rest of the tree.
 
 
+--------------------------------------------------------------------------------
+  8. Field
+--------------------------------------------------------------------------------
+
+  Size    Type    Description
+  ------  ------  --------------------------------------------------------------
+  4       u32     Property-name string id
+  1       u8      Type tag (below)
+  varies          Value, layout determined entirely by the tag
+
+  Tag  Name        Value encoding
+  ---  ----------  ---------------------------------------------------------
+  0    NONE        (no bytes)            unrepresentable / null
+  1    BOOL        u8 (0 or 1)
+  2    INT32       i32, little-endian
+  3    INT64       i64, little-endian
+  4    DOUBLE      f64, little-endian IEEE-754
+  5    STRING      u32 string id
+  6    COLOR       u32 packed 0xAARRGGBB
+  7    ASSET_REF   u32 asset index (0xFFFFFFFF = no asset)
+
+  What it's for: a self-describing key/value. The tag tells you exactly how
+  many bytes follow, so you can decode (or skip) a field without knowing the
+  component. Unknown tags are the one exception - their width is unknown, so
+  if you hit one, abandon the component and resync via payloadEnd (section 7).
+
+  How to apply fields to a component instance:
+
+    * Most fields: set the property named strings[nameId] to the decoded
+      value. INT32 also carries enum/flags values; COLOR is ARGB.
+
+    * ASSET_REF: this field's NAME is an authoring path property
+      (imagePath/fontPath/iconPath) but it carries an asset INDEX, not a path.
+      Do NOT try to set a path. Instead:
+          if index != 0xFFFFFFFF:
+              asset = assetTable[index]
+              comp.assetDomain        = strings[asset.domainId]
+              comp.assetRegistryValue = strings[asset.registryId]
+              comp.texture/font       = resolve(asset)   // section 5
+      The component's visual content comes entirely from the resolved asset;
+      the original editor path is not recoverable and is not needed.
+
+  How the writer chose the tag (for reference): a property whose name ends in
+  "Path" becomes ASSET_REF; "assetDomain"/"assetRegistryValue" are NOT emitted
+  as fields (they are folded into the asset record and reapplied as above);
+  everything else maps by type - bool->BOOL, integral->INT32/INT64,
+  floating-point->DOUBLE, enum/flags->INT32, QColor->COLOR, string->STRING,
+  anything else stringifiable->STRING, otherwise NONE.
+
+
+--------------------------------------------------------------------------------
+  9. Reader requirements (conformance checklist)
+--------------------------------------------------------------------------------
+
+  * Reject the file unless the first 4 bytes are "UIB3" and the version u16
+    equals 3. Do not attempt a "best effort" parse of a mismatched file.
+  * Treat header section offsets as authoritative; never infer them from
+    adjacency.
+  * Bounds-check every read against the section/file size. A length or offset
+    that runs past EOF invalidates the whole parse.
+  * Read the string table fully before the asset table or tree.
+  * Unknown component types and unknown field tags are non-fatal: skip via
+    payloadLen / resync to payload-end and continue.
+  * Cache resolved assets by asset index; multiple components legitimately
+    share one index.
+
+A reference decoder that round-trips this format back into an element tree
+ships with UIMaker2 as UiBinReader (see src/scene/UiBinReader.*); the matching
+encoder is UiBinWriter.
 ================================================================================
-  JSON Element Structure
-================================================================================
-
-The JSON section contains a single root element object. Every element uses
-this structure:
-
-  {
-    "id":         "<uuid-string>",
-    "name":       "ElementName",
-    "components": [ { "kind": "...", ... }, ... ],
-    "children":   [ { <element> }, ... ]
-  }
-
-  id          A UUID string (no braces) uniquely identifying this element.
-  name        Human-readable element name (e.g. "HealthBar", "StartButton").
-  components  Array of component objects. Each has a "kind" discriminator.
-  children    Array of child elements (recursive). Omitted or empty if none.
-
-Every element has at least a "Transform" component. Most elements have exactly
-two components: Transform + one visual/layout component.
-
-Path-bearing JSON keys (any key ending in "Path"):
-  imagePath   - texture / image file
-  fontPath    - TTF / OTF font file
-  iconPath    - icon image file
-  assetPath   - general asset reference (secondary/logical)
-
-All path values in baked .uibin files are relative asset keys matching
-entries in the asset table (e.g. "assets/hero.png").
-
-Slot elements (see the Slot component below) are locked child elements
-owned by "master" components such as TabContainer and RadialMenu. They
-carry a Slot component with a slotIndex identifying which tab or ring
-slice they belong to. Engines should treat Slot elements as the content
-container for that tab/slice: render the children of the matching slot
-rather than the master's direct children.
-
-
-================================================================================
-  Colour Encoding
-================================================================================
-
-All colour values are serialised as "#AARRGGBB" hex strings (8-digit with
-leading alpha), e.g.:
-
-  "#FFFFFFFF"   fully opaque white
-  "#FF32C850"   fully opaque green
-  "#8C000000"   ~55% transparent black
-  "#00000000"   fully transparent
-
-
-================================================================================
-  Anchor / Stretch / Alignment Flags
-================================================================================
-
-Several integer fields use a bitmask with these flag values:
-
-  NONE      = 0x00
-  LEFT      = 0x01
-  RIGHT     = 0x02
-  TOP       = 0x04
-  BOTTOM    = 0x08
-  CENTER_X  = 0x10
-  CENTER_Y  = 0x20
-
-Used by:
-  Transform.anchors   - edge anchoring (default 5 = LEFT|TOP)
-  Transform.stretch   - stretch fill (LEFT|RIGHT = horizontal, TOP|BOTTOM = vertical)
-  Text.alignment      - text alignment (CENTER_X = horizontal center, etc.)
-
-
-================================================================================
-  Element Sizing & Positioning Model
-================================================================================
-
-Every element's geometry is resolved in a single ordered pass. Implement
-this exactly to match UIMaker2's output:
-
-  1. Start with a base rect from the Transform component:
-       - size = (scaleX, scaleY)
-       - if stretch has LEFT|RIGHT: width  = parentWidth  - 2*x
-       - if stretch has TOP|BOTTOM: height = parentHeight - 2*y
-       (a stretched axis clamps to a tiny positive minimum, never <= 0)
-
-  2. Apply the element's remaining components in ascending update order.
-     The component that carries content/layout MAY overwrite the rect
-     size computed in step 1:
-       - Visual components size the rect to their intrinsic content
-         (e.g. Text/Button to the measured text box, Image/Icon/Sprite
-         to the source/frame size, Toggle/Dropdown/TextInput/Tooltip/
-         ListRepeater/RadialMenu/DragSlot to their drawn extents).
-         scaleX/scaleY are NOT used by these.
-       - StackLayout / GridLayout overwrite the rect to the size needed
-         to contain their children plus padding. scaleX/scaleY unused.
-       - ScrollBox keeps the step-1 size on its SCROLL axis and fits the
-         cross axis to its children.
-       - Slot overwrites the rect to its parent's rect (minus the tab
-         bar inset for a TabContainer master).
-       - Panel / no extra component: the step-1 rect is the final size.
-
-  3. With the FINAL rect size now known, position the element:
-       - If the element's parent owns a layout component, the parent
-         positions this element (see Layout Components). This element's
-         own x/y/anchors/stretch are ignored for positioning.
-       - Otherwise apply anchors against the FINAL size:
-           LEFT     : localX = x
-           RIGHT    : localX = parentWidth  - finalWidth  - x
-           CENTER_X : localX = (parentWidth  - finalWidth)/2  + x
-           TOP      : localY = y
-           BOTTOM   : localY = parentHeight - finalHeight - y
-           CENTER_Y : localY = (parentHeight - finalHeight)/2 + y
-         final position = parentTopLeft + (localX, localY)
-
-  4. Apply rotationDegrees about the center of the FINAL rect.
-
-The critical rule: anchoring and rotation always use the size produced
-AFTER content/layout sizing in step 2 - never the raw scaleX/scaleY -
-so a centered or right/bottom-anchored Text, Button, or layout container
-stays correctly aligned as its content (and therefore its size) changes.
-
-
-================================================================================
-  Component Reference
-================================================================================
-
-Each component object in the "components" array has a "kind" field that
-determines its type and available properties. Below is the full reference
-for every component kind, its properties, data types, default values, and
-usage guidance for game engine implementors.
-
-
---------------------------------------------------------------------------------
-  Transform
---------------------------------------------------------------------------------
-
-  Kind:     "Transform"
-  Purpose:  Position, size, rotation, and anchoring for the element.
-            Every element must have exactly one Transform component.
-            Does not render anything itself.
-
-  Property          Type     Default   Description
-  ----------------  -------  --------  ----------------------------------------
-  x                 double   0.0       X position offset in pixels
-  y                 double   0.0       Y position offset in pixels
-  scaleX            double   100.0     BASE width in pixels (may be overridden)
-  scaleY            double   100.0     BASE height in pixels (may be overridden)
-  rotationDegrees   double   0.0       Rotation around element center (degrees)
-  anchors           int      5         Anchor flags bitmask (see above)
-  stretch           int      0         Stretch flags bitmask (see above)
-
-  IMPORTANT - effective size vs. scaleX/scaleY:
-    scaleX/scaleY is only the element's BASE size. The element's FINAL
-    rendered size is resolved by applying its components in order (see
-    "Element Sizing & Positioning Model" below). Visual components
-    (Text, Image, Button, Icon, Sprite, Toggle, Tooltip, Dropdown,
-    TextInput, ListRepeater, RadialMenu, DragSlot) size the element to
-    their own intrinsic content and ignore scaleX/scaleY. Layout
-    components (StackLayout, GridLayout) size the element to fit their
-    children plus padding and ignore scaleX/scaleY. ScrollBox honours
-    scaleX/scaleY ONLY on its scroll axis. A Slot is sized to its
-    parent's rect. Only "plain" elements (Transform + Panel, or Transform
-    alone) actually use scaleX/scaleY directly as their size.
-
-  Engine usage:
-    - Use (x, y) as the element's position offset relative to its parent.
-    - Determine the element's effective (final) size first; only then
-      apply position, anchoring, and rotation.
-    - Apply rotationDegrees as a rotation about the element's center,
-      where "center" is the center of the FINAL rect (not the scaleX/
-      scaleY rect).
-    - Anchors are evaluated against the FINAL size, not scaleX/scaleY:
-        x = parentLeft + xOffset                         (LEFT, default)
-        x = parentLeft + parentW - finalW - xOffset      (RIGHT)
-        x = parentLeft + (parentW - finalW)/2 + xOffset  (CENTER_X)
-      and analogously for y with TOP/BOTTOM/CENTER_Y. Recompute when the
-      parent resizes so anchoring stays responsive.
-    - Stretch flags make the element fill the parent axis (LEFT|RIGHT =
-      fill width, TOP|BOTTOM = fill height): the stretched axis size
-      becomes parentExtent - 2*offset on that axis. Stretch contributes
-      to the BASE size and is therefore overridden by any visual/layout
-      component (it only survives on a plain element or on ScrollBox's
-      scroll axis).
-    - If the element's parent owns a layout component (StackLayout,
-      GridLayout, ScrollBox), this element's own x/y/anchors/stretch are
-      IGNORED for positioning - the parent layout positions it instead.
-      The Transform still supplies the base size that the layout measures.
-
-
---------------------------------------------------------------------------------
-  Image
---------------------------------------------------------------------------------
-
-  Kind:     "Image"
-  Purpose:  Displays a raster image (PNG, JPG, etc.) scaled to fill the
-            element rect.
-
-  Property    Type     Default       Description
-  ----------  -------  ------------  ------------------------------------------
-  imagePath   string   ""            Asset key for the image file
-  tint        colour   "#FFFFFFFF"   Colour tint (multiply with image pixels)
-  assetPath   string   ""            Secondary/logical asset reference
-
-  Engine usage:
-    - Load the image data from the asset table using imagePath as the key.
-    - Scale the image to fill the element rect (scaleX x scaleY).
-    - Apply tint as a colour multiply if your renderer supports it.
-    - If imagePath is empty or not found, render nothing or a placeholder.
-
-
---------------------------------------------------------------------------------
-  Text
---------------------------------------------------------------------------------
-
-  Kind:     "Text"
-  Purpose:  Renders a text string with configurable font, size, and colour.
-
-  Property      Type     Default       Description
-  ------------  -------  ------------  ----------------------------------------
-  text          string   ""            The text string to display
-  fontFamily    string   "Inter"       Font family name
-  pixelSize     int      24            Font size in pixels
-  color         colour   "#FFFFFFFF"   Text colour
-  fontPath      string   ""            Asset key for a custom font file (TTF/OTF)
-  assetPath     string   ""            Secondary/logical asset reference
-  alignment     int      5             Text alignment flags (see Anchor Flags)
-  hasBackground bool     false         If true, render a drop shadow behind the text
-
-  Engine usage:
-    - If fontPath is non-empty, load the font from the asset table.
-      Otherwise, use fontFamily to look up a system/engine font.
-    - Render the text string clipped to the element rect.
-    - Use alignment flags to position text within the rect:
-        LEFT (0x01)      = left-aligned (default)
-        RIGHT (0x02)     = right-aligned
-        CENTER_X (0x10)  = horizontally centered
-        TOP (0x04)       = top-aligned (default)
-        BOTTOM (0x08)    = bottom-aligned
-        CENTER_Y (0x20)  = vertically centered
-    - If hasBackground is true, draw the text a second time first at an
-      offset of max(1, pixelSize/16) pixels in both X and Y, in black with
-      alpha 160 (0xA0), to produce a drop-shadow effect. Then draw the
-      normal text on top in the configured color.
-
-
---------------------------------------------------------------------------------
-  Button
---------------------------------------------------------------------------------
-
-  Kind:     "Button"
-  Purpose:  An interactive button with a background skin (image or procedural)
-            and centered label text. Supports nine-slice image stretching.
-
-  Property          Type     Default       Description
-  ----------------  -------  ------------  ------------------------------------
-  text              string   "Button"      Button label text
-  backgroundColor   colour   "#FF282828"   Procedural skin gradient base colour
-  textColor         colour   "#FFFFFFFF"   Label text colour
-  fontFamily        string   "Inter"       Font family name
-  pixelSize         int      24            Font size in pixels
-  fontPath          string   ""            Asset key for custom font file
-  assetPath         string   ""            Secondary/logical asset reference
-  imagePath         string   ""            Asset key for custom skin image
-  sliceLeft         int      6             Nine-slice left margin (pixels)
-  sliceTop          int      6             Nine-slice top margin (pixels)
-  sliceRight        int      6             Nine-slice right margin (pixels)
-  sliceBottom       int      6             Nine-slice bottom margin (pixels)
-
-  Engine usage:
-    - If imagePath is non-empty, load the skin image from the asset table
-      and render it using nine-slice scaling with the given margins.
-    - If imagePath is empty, draw a procedural rounded-rect gradient using
-      backgroundColor as the base colour.
-    - Render the label text centered on the button rect.
-    - Register click/tap handling for interactivity.
-
-
---------------------------------------------------------------------------------
-  Panel
---------------------------------------------------------------------------------
-
-  Kind:     "Panel"
-  Purpose:  A simple filled rectangle with optional border and rounded corners.
-            Use as a container backdrop or visual grouping element.
-
-  Property          Type     Default       Description
-  ----------------  -------  ------------  ------------------------------------
-  backgroundColor   colour   "#C8323237"   Fill colour (default is semi-opaque)
-  borderColor       colour   "#FF64646E"   Border stroke colour
-  borderWidth       double   1.0           Border stroke width in pixels
-  cornerRadius      double   6.0           Rounded corner radius in pixels
-
-  Engine usage:
-    - Draw a filled rounded rectangle at the element rect.
-    - Apply border stroke if borderWidth > 0.
-    - Panels are often parent elements containing children.
-
-
---------------------------------------------------------------------------------
-  ProgressBar
---------------------------------------------------------------------------------
-
-  Kind:     "ProgressBar"
-  Purpose:  A horizontal or vertical progress bar with a track (background)
-            and filled portion.
-
-  Property          Type     Default       Description
-  ----------------  -------  ------------  ------------------------------------
-  value             double   0.5           Progress value, clamped to [0.0, 1.0]
-  fillColor         colour   "#FF32C850"   Fill/foreground colour
-  backgroundColor   colour   "#FF28282D"   Track background colour
-  borderColor       colour   "#FF50505A"   Border stroke colour
-  direction         int      0             0 = Horizontal, 1 = Vertical
-  cornerRadius      double   4.0           Rounded corner radius in pixels
-
-  Engine usage:
-    - Draw the track (background) as a full-sized rounded rect.
-    - Draw the fill on top, sized to value * total_length along the
-      appropriate axis.
-    - Horizontal: fills left-to-right. Vertical: fills bottom-to-top.
-    - Bind "value" to a game variable (HP, XP, loading, etc.) and
-      update at runtime.
-
-
---------------------------------------------------------------------------------
-  Toggle
---------------------------------------------------------------------------------
-
-  Kind:     "Toggle"
-  Purpose:  An iOS-style slide toggle (pill-shaped track with circular knob)
-            with an optional text label.
-
-  Property    Type     Default       Description
-  ----------  -------  ------------  ------------------------------------------
-  checked     bool     false         Whether the toggle is in the "on" state
-  onColor     colour   "#FF32C850"   Track colour when checked
-  offColor    colour   "#FF50505A"   Track colour when unchecked
-  knobColor   colour   "#FFFFFFFF"   Circular knob fill colour
-  label       string   "Toggle"      Optional label text (empty = no label)
-
-  Engine usage:
-    - Draw a pill-shaped (fully rounded) track using the element width.
-    - Position the circular knob on the left (unchecked) or right (checked).
-    - Use onColor/offColor for the track fill based on the checked state.
-    - If label is non-empty, render it to the right of the toggle track.
-    - Register click handling to toggle the checked state.
-
-
---------------------------------------------------------------------------------
-  Dropdown
---------------------------------------------------------------------------------
-
-  Kind:     "Dropdown"
-  Purpose:  A dropdown/combo-box control showing the currently selected option
-            with a downward-pointing arrow chevron.
-
-  Property          Type     Default                   Description
-  ----------------  -------  ------------------------  ------------------------
-  options           string   "Option A,Option B,..."   Comma-separated options
-  selectedIndex     int      0                         Active option (0-based)
-  backgroundColor   colour   "#FF2D2D32"               Background colour
-  textColor         colour   "#FFFFFFFF"               Text and arrow colour
-  borderColor       colour   "#FF5A5A64"               Border stroke colour
-  fontFamily        string   "Inter"                   Font family name
-  pixelSize         int      16                        Font size in pixels
-
-  Engine usage:
-    - Parse the options string by splitting on commas.
-    - Display options[selectedIndex] as the current value.
-    - Draw a downward arrow/chevron on the right side.
-    - On click, show a popup/list of all options. Update selectedIndex
-      when the user selects a different option.
-
-
---------------------------------------------------------------------------------
-  TextInput
---------------------------------------------------------------------------------
-
-  Kind:     "TextInput"
-  Purpose:  A single-line text input field with placeholder text and cursor.
-
-  Property            Type     Default           Description
-  ------------------  -------  ----------------  ----------------------------
-  placeholder         string   "Enter text..."   Hint text when field is empty
-  text                string   ""                Current field content
-  backgroundColor     colour   "#FF1E1E23"       Field background colour
-  textColor           colour   "#FFFFFFFF"       Text and cursor colour
-  placeholderColor    colour   "#FF787882"       Placeholder text colour
-  borderColor         colour   "#FF50505A"       Border stroke colour
-  fontFamily          string   "Inter"           Font family name
-  pixelSize           int      16                Font size in pixels
-
-  Engine usage:
-    - Draw a rounded-rect field background with border.
-    - If text is empty, display placeholder in placeholderColor.
-    - Otherwise display text in textColor with a blinking cursor.
-    - Handle keyboard input to modify the text value at runtime.
-    - Bind the text value to a game variable for form input.
-
-
---------------------------------------------------------------------------------
-  Icon
---------------------------------------------------------------------------------
-
-  Kind:     "Icon"
-  Purpose:  A fixed-size square icon image. Useful for ability icons, status
-            indicators, inventory item icons, etc.
-
-  Property    Type     Default       Description
-  ----------  -------  ------------  ------------------------------------------
-  imagePath   string   ""            Asset key for the icon image file
-  tintColor   colour   "#FFFFFFFF"   Colour tint (multiply with image)
-  iconSize    int      32            Square icon size in pixels
-  assetPath   string   ""            Secondary/logical asset reference
-
-  Engine usage:
-    - Load the icon image from the asset table using imagePath.
-    - Render it at iconSize x iconSize pixels, centered in the element rect.
-    - Apply tintColor as a colour multiply.
-    - If no image is available, render a placeholder.
-
-
---------------------------------------------------------------------------------
-  Sprite
---------------------------------------------------------------------------------
-
-  Kind:     "Sprite"
-  Purpose:  Displays a single frame from a sprite sheet (grid of frames).
-            Useful for animated UI elements, character portraits, item icons
-            from atlas textures, etc.
-
-  Property      Type     Default   Description
-  ------------  -------  --------  --------------------------------------------
-  imagePath     string   ""        Asset key for the sprite sheet image
-  frameWidth    int      64        Width of each frame in pixels
-  frameHeight   int      64        Height of each frame in pixels
-  frameCount    int      1         Total number of frames in the sheet
-  currentFrame  int      0         Zero-based index of the frame to display
-  columns       int      1         Number of columns in the sprite sheet grid
-  assetPath     string   ""        Secondary/logical asset reference
-
-  Engine usage:
-    - Load the sprite sheet from the asset table using imagePath.
-    - Calculate the source rect for the current frame:
-        col = currentFrame % columns
-        row = currentFrame / columns
-        srcRect = (col * frameWidth, row * frameHeight, frameWidth, frameHeight)
-    - Draw the source rect scaled to the element rect.
-    - To animate, increment currentFrame over time (wrapping at frameCount).
-
-
---------------------------------------------------------------------------------
-  Tooltip
---------------------------------------------------------------------------------
-
-  Kind:     "Tooltip"
-  Purpose:  A small popup bubble with text and a downward-pointing arrow.
-            Typically shown on hover over another UI element.
-
-  Property          Type     Default              Description
-  ----------------  -------  -------------------  ----------------------------
-  tooltipText       string   "Tooltip text here"  The tooltip message
-  backgroundColor   colour   "#E619191E"          Bubble background colour
-  textColor         colour   "#FFDCDCE1"          Text colour
-  borderColor       colour   "#FF50505A"          Bubble border colour
-  fontFamily        string   "Inter"              Font family name
-  pixelSize         int      13                   Font size in pixels
-
-  Engine usage:
-    - Draw a rounded-rect bubble with a triangular pointer arrow below.
-    - Render tooltipText centered inside the bubble.
-    - Typically hidden by default; show when the user hovers over or
-      long-presses the associated element.
-    - Position dynamically near the triggering element.
-
-
---------------------------------------------------------------------------------
-  Modal
---------------------------------------------------------------------------------
-
-  Kind:     "Modal"
-  Purpose:  A full-screen overlay with a centered content panel. Used for
-            dialog boxes, confirmation popups, pause menus, etc.
-
-  Property        Type     Default       Description
-  --------------  -------  ------------  --------------------------------------
-  overlayColor    colour   "#8C000000"   Full-area backdrop colour (semi-transparent)
-  panelColor      colour   "#FF2D2D32"   Centered panel fill colour
-  borderColor     colour   "#FF5A5A64"   Panel border colour
-  cornerRadius    double   8.0           Panel corner radius in pixels
-  visible         bool     true          Whether the modal is shown
-
-  Engine usage:
-    - When visible = true:
-        1. Draw a full-element-rect overlay filled with overlayColor.
-        2. Draw a centered panel (roughly 70% of element size) with
-           panelColor, borderColor, and cornerRadius.
-        3. Render child elements inside the panel area.
-    - When visible = false, do not render the modal.
-    - Provide a close action (clicking outside the panel, an X button, etc.)
-      that sets visible = false.
-    - Block input to elements behind the overlay while visible.
-
-
---------------------------------------------------------------------------------
-  TabContainer
---------------------------------------------------------------------------------
-
-  Kind:     "TabContainer"
-  Purpose:  A tabbed interface with a tab bar across the top and a content
-            area below. Clicking a tab switches the visible content.
-
-  Property          Type     Default              Description
-  ----------------  -------  -------------------  ----------------------------
-  tabNames          string   "Tab 1,Tab 2,Tab 3"  Comma-separated tab labels
-  activeTab         int      0                    Active tab index (0-based)
-  tabHeight         int      32                   Tab bar height in pixels
-  activeColor       colour   "#FF3C3C44"          Active tab background
-  inactiveColor     colour   "#FF28282D"          Inactive tab background
-  textColor         colour   "#FFFFFFFF"          Tab label text colour
-  backgroundColor   colour   "#FF323237"          Content area background
-
-  Engine usage:
-    - Parse tabNames by splitting on commas to get the tab list.
-    - Draw the tab bar across the top (height = tabHeight). Divide
-      equally among tabs. Highlight the active tab with activeColor.
-    - Draw the content area below the tab bar with backgroundColor.
-    - Register click handling on tabs to switch activeTab.
-    - Content children are held by Slot elements (see "Slot" component).
-      A TabContainer element has one Slot child per tab, each carrying a
-      Slot component with slotIndex matching the tab index and
-      masterKind = "TabContainer". Render the children of the slot whose
-      slotIndex equals activeTab; hide the other slots and their children.
-    - Slot elements are positioned below the tab bar automatically: their
-      rect occupies (parentWidth, parentHeight - tabHeight), positioned at
-      (0, tabHeight) relative to the TabContainer.
-
-
---------------------------------------------------------------------------------
-  RadialMenu
---------------------------------------------------------------------------------
-
-  Kind:     "RadialMenu"
-  Purpose:  A ring-shaped (donut/annulus) menu divided into equal arc slices.
-            Used for quick-access action wheels in games (weapon select,
-            emote wheels, ability rings, etc.).
-
-  Property          Type     Default       Description
-  ----------------  -------  ------------  ------------------------------------
-  sliceCount        int      6             Number of arc segments (minimum 2)
-  innerRadius       double   40.0          Inner hole radius in pixels
-  outerRadius       double   100.0         Outer ring radius in pixels
-  sliceColor        colour   "#C832323A"   Default slice fill colour
-  borderColor       colour   "#FF646473"   Slice border/separator colour
-  highlightColor    colour   "#6450A0FF"   Fill for the highlighted slice
-  highlightIndex    int      -1            Highlighted slice index (-1 = none)
-
-  Engine usage:
-    - The element size is outerRadius * 2 in both dimensions.
-    - Draw an annulus (ring) centered in the element rect.
-    - Divide the ring into sliceCount equal arc segments.
-    - Fill each slice with sliceColor, except highlightIndex which uses
-      highlightColor.
-    - Draw slice separators with borderColor.
-    - On input, calculate which slice the cursor/stick is pointing at
-      based on the angle from center.
-    - Set highlightIndex to the hovered slice. Trigger an action on
-      selection/release.
-    - Per-slice content (icons, labels) is held by Slot elements (see
-      "Slot" component). A RadialMenu element has one Slot child per
-      slice, each with slotIndex matching the slice index and
-      masterKind = "RadialMenu". Unlike TabContainer, all slots are
-      visible at once — render the children of every slot, not just
-      the highlighted one.
-
-
---------------------------------------------------------------------------------
-  Minimap
---------------------------------------------------------------------------------
-
-  Kind:     "Minimap"
-  Purpose:  A minimap frame showing a top-down view of the game world. Can
-            be rectangular or circular.
-
-  Property          Type     Default       Description
-  ----------------  -------  ------------  ------------------------------------
-  backgroundColor   colour   "#C8141E14"   Map area background colour
-  borderColor       colour   "#FF647864"   Frame border colour
-  viewportColor     colour   "#3CFFFFFF"   Viewport indicator colour
-  borderWidth       double   2.0           Frame border width in pixels
-  shape             int      0             0 = Rectangle, 1 = Circle
-
-  Engine usage:
-    - Draw the frame shape (rect or circle) filled with backgroundColor.
-    - Apply borderColor stroke at borderWidth.
-    - Render a minimap texture of your game world inside the frame.
-    - Draw a viewport indicator rectangle (using viewportColor) showing
-      the player's current camera view relative to the full map.
-    - If shape = 1 (circle), clip the minimap texture to a circle.
-    - Update the minimap texture and viewport indicator each frame as
-      the player moves.
-
-
---------------------------------------------------------------------------------
-  DragSlot
---------------------------------------------------------------------------------
-
-  Kind:     "DragSlot"
-  Purpose:  An inventory-style drag-and-drop slot. Can be empty or contain
-            an item icon. Used for inventory grids, equipment slots,
-            hotbar slots, crafting grids, etc.
-
-  Property          Type     Default       Description
-  ----------------  -------  ------------  ------------------------------------
-  slotSize          int      64            Square slot size in pixels
-  backgroundColor   colour   "#FF282830"   Slot background colour
-  borderColor       colour   "#FF50505F"   Slot border colour
-  emptyColor        colour   "#78373741"   Inner tint when slot is empty
-  cornerRadius      double   4.0           Corner radius in pixels
-  isEmpty           bool     true          Whether the slot has an item
-  iconPath          string   ""            Asset key for item icon image
-  assetPath         string   ""            Secondary/logical asset reference
-
-  Engine usage:
-    - Draw a rounded-rect slot at slotSize x slotSize.
-    - If isEmpty = true, draw an inner tinted rect with emptyColor.
-    - If isEmpty = false, load and display the item icon from iconPath.
-    - Implement drag-and-drop:
-        * On drag start: pick up the item (set isEmpty = true, begin
-          dragging the icon sprite).
-        * On drop: place the item in the target slot (set isEmpty = false,
-          set iconPath to the item's icon asset key).
-    - Swap items between slots on drag-and-drop between DragSlots.
-
-
---------------------------------------------------------------------------------
-  ListRepeater
---------------------------------------------------------------------------------
-
-  Kind:     "ListRepeater"
-  Purpose:  Renders a fixed number of identical placeholder rows (or columns)
-            with alternating colours. Used for scrollable lists, leaderboards,
-            chat logs, inventory lists, etc.
-
-  Property          Type     Default                        Description
-  ----------------  -------  -----------------------------  -----------------
-  itemCount         int      5                              Number of visible items/rows
-  itemHeight        int      40                             Height of each row (or width if horizontal)
-  spacing           double   2.0                            Gap between items in pixels
-  direction         int      0                              0 = Vertical, 1 = Horizontal
-  labels            string   "Item 1,Item 2,Item 3,Item 4,Item 5"   Comma-separated row labels
-  itemColor         colour   "#FF2D2D34"                    Even-indexed item background
-  alternateColor    colour   "#FF32323A"                    Odd-indexed item background
-  borderColor       colour   "#FF464650"                    Item border colour
-
-  Engine usage:
-    - Compute total list size: itemCount * itemHeight + (itemCount-1) * spacing.
-    - Draw itemCount rectangles stacked vertically (direction 0) or
-      horizontally (direction 1).
-    - Alternate between itemColor and alternateColor for visual separation.
-    - Parse labels by splitting on commas; use the trimmed value at each
-      index as the row's placeholder text. If the CSV has fewer entries
-      than itemCount (or an entry is blank), fall back to "Item N".
-    - At runtime, bind each row to data from a list/array (player names,
-      inventory items, chat messages, etc.). The labels field is just a
-      design-time placeholder.
-    - If the data source has more items than itemCount, implement scrolling
-      and update which data items are visible.
-
-
---------------------------------------------------------------------------------
-  Slot
---------------------------------------------------------------------------------
-
-  Kind:     "Slot"
-  Purpose:  Marks an element as a locked content container owned by a
-            master component (TabContainer or RadialMenu). Not placed by
-            end-users; automatically created by the master and managed as
-            part of its lifecycle.
-
-  Property      Type     Default    Description
-  ------------  -------  ---------  ----------------------------------------
-  slotIndex     int      0          Zero-based index identifying which
-                                    tab / slice this slot belongs to.
-  masterKind    string   ""         Kind string of the master component
-                                    ("TabContainer" or "RadialMenu").
-
-  Engine usage:
-    - Slot elements are regular children of a master element. Their own
-      children are the actual user-authored content.
-    - A Slot element always carries a Transform component and nothing
-      visible of its own; it is purely a coordinate container.
-    - For masterKind = "TabContainer": render the children of the slot
-      whose slotIndex equals the master's activeTab; skip the others.
-      The slot's rect excludes the tab bar area (see TabContainer notes).
-    - For masterKind = "RadialMenu": all slots are visible simultaneously;
-      render every slot's children. Use slotIndex only if you wish to
-      position content per slice.
-    - Do not render a visual for the Slot component itself. It has no
-      paint output.
-    - Slot elements carry a Transform with stretch flags LEFT|RIGHT|TOP|
-      BOTTOM and the authoring tool may override position/size per
-      masterKind. Honour the Transform values as written in JSON.
-
-
-================================================================================
-  Layout Components
-================================================================================
-
-Layout components do not render visible content themselves. They arrange
-their element's children automatically. In the authoring tool, they render
-a faint dashed outline for editor visibility only; game engines should NOT
-render any visual for these components.
-
-A layout component OWNS the placement of its element's direct children:
-each child's own Transform x/y, anchors, and stretch are ignored while
-its parent has a layout component. The child's Transform still provides
-the base size the layout measures (subject to the child's own content/
-layout sizing per the Sizing & Positioning Model). Engines must run the
-layout algorithm below to position the children; do not also apply the
-child's anchors on top, or it will be double-positioned. Child positions
-are expressed relative to the layout element's top-left.
-
-
---------------------------------------------------------------------------------
-  StackLayout
---------------------------------------------------------------------------------
-
-  Kind:     "StackLayout"
-  Purpose:  Arranges children sequentially in a vertical or horizontal stack.
-
-  Property    Type     Default   Description
-  ----------  -------  --------  ----------------------------------------------
-  direction   int      0         0 = Vertical (top to bottom), 1 = Horizontal
-  spacing     double   8.0       Gap between children in pixels
-  padding     double   8.0       Inset padding on all four sides in pixels
-
-  Engine usage:
-    - Position each child element sequentially along the layout axis.
-    - Insert spacing pixels between consecutive children.
-    - Offset the first child by padding pixels from the top-left.
-    - The parent element's size should expand to fit all children plus
-      padding on all sides.
-
-
---------------------------------------------------------------------------------
-  GridLayout
---------------------------------------------------------------------------------
-
-  Kind:     "GridLayout"
-  Purpose:  Arranges children in a multi-column grid.
-
-  Property    Type     Default   Description
-  ----------  -------  --------  ----------------------------------------------
-  columns     int      2         Number of columns (minimum 1)
-  spacingH    double   8.0       Horizontal gap between columns in pixels
-  spacingV    double   8.0       Vertical gap between rows in pixels
-  padding     double   8.0       Inset padding on all four sides in pixels
-
-  Engine usage:
-    - Place children left-to-right, top-to-bottom into a grid with the
-      specified number of columns.
-    - Child index 0 goes to (row 0, col 0), index 1 to (row 0, col 1), etc.
-    - Compute row heights from the tallest child in each row, and column
-      widths from the widest child in each column.
-    - Insert spacingH between columns and spacingV between rows.
-    - Offset the grid by padding on all sides.
-
-
---------------------------------------------------------------------------------
-  ScrollBox
---------------------------------------------------------------------------------
-
-  Kind:     "ScrollBox"
-  Purpose:  A scrollable container that clips children to its bounds and
-            arranges them like StackLayout, but does not shrink to fit.
-            The scroll axis size is fixed by the Transform's dimensions.
-
-  Property    Type     Default   Description
-  ----------  -------  --------  ----------------------------------------------
-  direction   int      0         0 = Vertical scroll, 1 = Horizontal scroll
-  spacing     double   8.0       Gap between children in pixels
-  padding     double   8.0       Inset padding on all four sides in pixels
-
-  Engine usage:
-    - Clip all child rendering to the element rect (scissor/mask).
-    - Arrange children like StackLayout along the scroll axis.
-    - If total child extent exceeds the element size on the scroll axis,
-      enable scrolling. Track a scroll offset and translate children by
-      the offset.
-    - Handle scroll input (mouse wheel, touch drag, gamepad stick) to
-      update the scroll offset.
-    - Optionally render a scrollbar indicator.
-
-
-================================================================================
-  Notes
-================================================================================
-
-- Byte order: all uint32 values in the binary header/asset table are big-endian.
-- The JSON section uses compact formatting (no extra whitespace).
-- Asset keys use forward slashes as path separators regardless of platform.
-- If a component references a path that has no matching asset table entry,
-  the asset was missing at bake time. Handle gracefully (placeholder texture).
-- The format does not use compression. Implementors may apply external
-  compression (gzip, LZ4, etc.) around the entire .uibin if desired.
-- Version field allows future format extensions. Readers should reject
-  versions they do not understand.
-- All colour strings use #AARRGGBB hex format (Qt HexArgb). Parse the
-  alpha channel from the first two hex digits after the '#'.
-- Integer enum fields (direction, shape) use the values documented above.
-  Unknown values should be treated as the default (0).

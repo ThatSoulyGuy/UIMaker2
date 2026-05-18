@@ -220,6 +220,14 @@ void MainWindow::BuildPropertyDock()
     layout->addWidget(propertyPanel);
     contents->setLayout(layout);
 
+    // Keep the active document's project root in sync with the root the user
+    // establishes through the asset browse flow.
+    connect(propertyPanel, &PropertyEditorPanel::ProjectRootChanged, this, [this](const QString& dir)
+    {
+        if (document)
+            document->SetBaseDir(dir);
+    });
+
     propertyPanel->SetTarget(document->GetRoot());
 }
 
@@ -374,6 +382,8 @@ void MainWindow::ConnectActions()
         delete document;
 
         document = new SceneDocument(this);
+        // Fresh scene has no project root yet; clear any stale resolution base.
+        document->SetBaseDir(QString());
 
         m_viewport->SetDocument(document);
 
@@ -396,7 +406,12 @@ void MainWindow::ConnectActions()
             return;
 
         if (SceneExporter::ExportToFolder(document, folder))
+        {
+            // The exported folder is now the project root: assets live there
+            // and subsequent relative-path edits resolve against it.
+            document->SetBaseDir(folder);
             QMessageBox::information(this, "Export", "Scene exported successfully.");
+        }
         else
             QMessageBox::warning(this, "Export Failed", "Could not export scene to folder.");
     });
@@ -432,11 +447,11 @@ void MainWindow::ConnectActions()
         QByteArray json = file.readAll();
         file.close();
 
-        // Resolve relative asset paths against the JSON file's directory
-        QString baseDir = QFileInfo(path).absolutePath();
-        json = SceneExporter::ResolveJsonPaths(json, baseDir);
-
         SceneDocument* newDoc = new SceneDocument(this);
+
+        // The JSON file's directory is the project root; asset paths inside it
+        // are relative to here and resolved on demand (no JSON rewriting).
+        newDoc->SetBaseDir(QFileInfo(path).absolutePath());
 
         if (!newDoc->LoadJson(json))
         {

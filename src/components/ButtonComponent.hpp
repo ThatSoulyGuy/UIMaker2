@@ -13,6 +13,7 @@
 #include <algorithm>
 
 #include "core/Component.hpp"
+#include "core/AssetContext.hpp"
 
 class ButtonComponent : public Component
 {
@@ -23,7 +24,8 @@ class ButtonComponent : public Component
     Q_PROPERTY(QString fontFamily READ GetFontFamily WRITE SetFontFamily NOTIFY ComponentChanged)
     Q_PROPERTY(int pixelSize READ GetPixelSize WRITE SetPixelSize NOTIFY ComponentChanged)
     Q_PROPERTY(QString fontPath READ GetFontPath WRITE SetFontPath NOTIFY ComponentChanged)
-    Q_PROPERTY(QString assetPath READ GetAssetPath WRITE SetAssetPath NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetDomain READ GetAssetDomain WRITE SetAssetDomain NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetRegistryValue READ GetAssetRegistryValue WRITE SetAssetRegistryValue NOTIFY ComponentChanged)
     Q_PROPERTY(QString imagePath READ GetImagePath WRITE SetImagePath NOTIFY ComponentChanged)
     Q_PROPERTY(int sliceLeft READ GetSliceLeft WRITE SetSliceLeft NOTIFY ComponentChanged)
     Q_PROPERTY(int sliceTop READ GetSliceTop WRITE SetSliceTop NOTIFY ComponentChanged)
@@ -103,7 +105,7 @@ public:
         fontPath = v;
         if (!fontPath.isEmpty())
         {
-            int id = QFontDatabase::addApplicationFont(fontPath);
+            int id = QFontDatabase::addApplicationFont(AssetContext::Resolve(fontPath));
             if (id != -1)
             {
                 const QStringList fams = QFontDatabase::applicationFontFamilies(id);
@@ -114,8 +116,11 @@ public:
         NotifyChanged();
     }
 
-    QString GetAssetPath() const noexcept { return assetPath; }
-    void SetAssetPath(const QString& v) { if (assetPath == v) return; assetPath = v; NotifyChanged(); }
+    QString GetAssetDomain() const noexcept { return assetDomain; }
+    void SetAssetDomain(const QString& v) { if (assetDomain == v) return; assetDomain = v; NotifyChanged(); }
+
+    QString GetAssetRegistryValue() const noexcept { return assetRegistryValue; }
+    void SetAssetRegistryValue(const QString& v) { if (assetRegistryValue == v) return; assetRegistryValue = v; NotifyChanged(); }
 
     QString GetImagePath() const noexcept { return imagePath; }
     void SetImagePath(const QString& v)
@@ -125,7 +130,7 @@ public:
         customSkin = QPixmap();
         if (!imagePath.isEmpty())
         {
-            QPixmap loaded(imagePath);
+            QPixmap loaded(AssetContext::Resolve(imagePath));
             if (!loaded.isNull())
                 customSkin = loaded;
         }
@@ -151,7 +156,8 @@ public:
         out["fontFamily"] = fontFamily;
         out["pixelSize"] = pixelSize;
         out["fontPath"] = fontPath;
-        out["assetPath"] = assetPath;
+        out["assetDomain"] = assetDomain;
+        out["assetRegistryValue"] = assetRegistryValue;
         out["imagePath"] = imagePath;
         out["sliceLeft"] = sliceLeft;
         out["sliceTop"] = sliceTop;
@@ -167,7 +173,8 @@ public:
         SetFontFamily(in["fontFamily"].toString(fontFamily));
         SetPixelSize(in["pixelSize"].toInt(pixelSize));
         SetFontPath(in["fontPath"].toString());
-        SetAssetPath(in["assetPath"].toString());
+        SetAssetDomain(in["assetDomain"].toString());
+        SetAssetRegistryValue(in["assetRegistryValue"].toString());
         SetImagePath(in["imagePath"].toString());
         SetSliceLeft(in["sliceLeft"].toInt(6));
         SetSliceTop(in["sliceTop"].toInt(6));
@@ -268,7 +275,8 @@ private:
     QString fontFamily;
     int pixelSize;
     QString fontPath;
-    QString assetPath;
+    QString assetDomain;
+    QString assetRegistryValue;
     QString imagePath;
     QPixmap customSkin;
     int sliceLeft   = 6;

@@ -1,16 +1,16 @@
 #include "scene/SceneExporter.hpp"
 #include "scene/SceneDocument.hpp"
+#include "scene/UiBinWriter.hpp"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonArray>
-#include <QDataStream>
 
 // ---------------------------------------------------------------------------
 // Path collection: walk JSON tree, find non-empty string values whose key
-// ends with "Path"
+// ends with "Path" (imagePath / fontPath / iconPath).
 // ---------------------------------------------------------------------------
 
 void SceneExporter::CollectAssetPaths(const QJsonObject& elementObj, QSet<QString>& out)
@@ -35,8 +35,9 @@ void SceneExporter::CollectAssetPaths(const QJsonObject& elementObj, QSet<QStrin
 }
 
 // ---------------------------------------------------------------------------
-// Build mapping: absolute path -> "assets/filename.ext"
-// Handles duplicate filenames by appending _1, _2, etc.
+// Build mapping for ABSOLUTE leftover paths only: absolute -> "assets/name.ext"
+// (relative paths are already project-root-relative and need no remapping).
+// Handles duplicate filenames by appending _1, _2, ...
 // ---------------------------------------------------------------------------
 
 QMap<QString, QString> SceneExporter::BuildAssetMapping(const QSet<QString>& absolutePaths)
@@ -66,7 +67,7 @@ QMap<QString, QString> SceneExporter::BuildAssetMapping(const QSet<QString>& abs
 }
 
 // ---------------------------------------------------------------------------
-// Rewrite paths in JSON tree using the mapping
+// Rewrite paths in JSON tree using the mapping (used only for absolute paths).
 // ---------------------------------------------------------------------------
 
 QJsonObject SceneExporter::RewritePaths(const QJsonObject& elementObj, const QMap<QString, QString>& mapping)
@@ -103,7 +104,12 @@ QJsonObject SceneExporter::RewritePaths(const QJsonObject& elementObj, const QMa
 }
 
 // ---------------------------------------------------------------------------
-// Export to Folder: scene.json + assets/ subfolder
+// Export to Folder: scene.json + assets/ subfolder.
+//
+// imagePath/fontPath/iconPath are stored relative to the project root. Each
+// referenced file is resolved against the document's base directory and copied
+// into folderPath at the SAME relative location, so scene.json can be written
+// verbatim. Any stray absolute path is flattened into assets/ and rewritten.
 // ---------------------------------------------------------------------------
 
 bool SceneExporter::ExportToFolder(const SceneDocument* doc, const QString& folderPath)
@@ -117,37 +123,54 @@ bool SceneExporter::ExportToFolder(const SceneDocument* doc, const QString& fold
 
     QJsonObject rootObj = jdoc.object();
 
-    // Collect all referenced asset paths
-    QSet<QString> assetPaths;
-    CollectAssetPaths(rootObj, assetPaths);
+    QSet<QString> allPaths;
+    CollectAssetPaths(rootObj, allPaths);
 
-    // Build mapping and create assets directory
-    QMap<QString, QString> mapping = BuildAssetMapping(assetPaths);
+    const QString srcBase = doc->GetBaseDir();
+    QDir outDir(folderPath);
 
-    QDir dir(folderPath);
-    if (!assetPaths.isEmpty())
-        dir.mkpath("assets");
+    // Absolute leftovers get flattened into assets/ and rewritten in the JSON.
+    QSet<QString> absolutePaths;
+    for (const QString& p : allPaths)
+        if (QDir::isAbsolutePath(p))
+            absolutePaths.insert(p);
 
-    // Copy asset files
-    for (auto it = mapping.begin(); it != mapping.end(); ++it)
+    QMap<QString, QString> absMapping = BuildAssetMapping(absolutePaths);
+
+    auto copyInto = [](const QString& src, const QString& dst) -> bool
     {
-        QString srcPath = it.key();
-        QString dstPath = dir.filePath(it.value());
+        if (src.isEmpty() || !QFile::exists(src))
+            return false;
 
-        if (QFile::exists(srcPath))
-        {
-            QFile::remove(dstPath);
-            QFile::copy(srcPath, dstPath);
-        }
+        // Skip copying a file onto itself (exporting into the project root).
+        if (QFileInfo(src).canonicalFilePath() == QFileInfo(dst).canonicalFilePath()
+            && !QFileInfo(src).canonicalFilePath().isEmpty())
+            return true;
+
+        QDir().mkpath(QFileInfo(dst).absolutePath());
+        QFile::remove(dst);
+        return QFile::copy(src, dst);
+    };
+
+    // Relative assets: keep their relative location under folderPath.
+    for (const QString& p : allPaths)
+    {
+        if (QDir::isAbsolutePath(p))
+            continue;
+
+        const QString src = srcBase.isEmpty() ? p : QDir(srcBase).filePath(p);
+        copyInto(src, outDir.filePath(p));
     }
 
-    // Rewrite JSON with relative paths
-    QJsonObject rewritten = RewritePaths(rootObj, mapping);
-    QJsonDocument outDoc(rewritten);
-    QByteArray outJson = outDoc.toJson(QJsonDocument::Indented);
+    // Absolute assets: copy into assets/<name>.
+    for (auto it = absMapping.begin(); it != absMapping.end(); ++it)
+        copyInto(it.key(), outDir.filePath(it.value()));
 
-    // Write scene.json
-    QFile outFile(dir.filePath("scene.json"));
+    QJsonObject rewritten = absMapping.isEmpty() ? rootObj : RewritePaths(rootObj, absMapping);
+    QByteArray outJson = QJsonDocument(rewritten).toJson(QJsonDocument::Indented);
+
+    QDir().mkpath(folderPath);
+    QFile outFile(outDir.filePath("scene.json"));
     if (!outFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return false;
 
@@ -158,118 +181,10 @@ bool SceneExporter::ExportToFolder(const SceneDocument* doc, const QString& fold
 }
 
 // ---------------------------------------------------------------------------
-// Bake to .uibin: binary format with embedded assets
-//
-// Format (big-endian):
-//   [4 bytes]  Magic: "UIBN"
-//   [uint32]   Version: 1
-//   [uint32]   JSON data length
-//   [uint32]   Asset count
-//   [N bytes]  JSON data (UTF-8, compact)
-//   Per asset:
-//     [uint32]   Key string length (bytes)
-//     [N bytes]  Key string (UTF-8)
-//     [uint32]   Data length (bytes)
-//     [N bytes]  Raw file data
+// Bake to .uibin: fully custom binary container (see uibin_format_spec.txt).
 // ---------------------------------------------------------------------------
 
 bool SceneExporter::BakeToUiBin(const SceneDocument* doc, const QString& filePath)
 {
-    QByteArray jsonBytes = doc->ExportJson();
-
-    QJsonParseError err;
-    QJsonDocument jdoc = QJsonDocument::fromJson(jsonBytes, &err);
-    if (err.error != QJsonParseError::NoError || !jdoc.isObject())
-        return false;
-
-    QJsonObject rootObj = jdoc.object();
-
-    // Collect and map asset paths
-    QSet<QString> assetPaths;
-    CollectAssetPaths(rootObj, assetPaths);
-    QMap<QString, QString> mapping = BuildAssetMapping(assetPaths);
-
-    // Read asset files into memory
-    QMap<QString, QByteArray> assets;
-    for (auto it = mapping.begin(); it != mapping.end(); ++it)
-    {
-        QFile f(it.key());
-        if (f.open(QIODevice::ReadOnly))
-        {
-            assets[it.value()] = f.readAll();
-            f.close();
-        }
-    }
-
-    // Rewrite JSON with relative keys
-    QJsonObject rewritten = RewritePaths(rootObj, mapping);
-    QByteArray compactJson = QJsonDocument(rewritten).toJson(QJsonDocument::Compact);
-
-    // Write binary
-    QFile outFile(filePath);
-    if (!outFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return false;
-
-    QDataStream stream(&outFile);
-    stream.setByteOrder(QDataStream::BigEndian);
-
-    // Magic
-    stream.writeRawData("UIBN", 4);
-
-    // Version
-    stream << static_cast<quint32>(1);
-
-    // JSON length and asset count
-    stream << static_cast<quint32>(compactJson.size());
-    stream << static_cast<quint32>(assets.size());
-
-    // JSON data
-    stream.writeRawData(compactJson.constData(), compactJson.size());
-
-    // Asset table
-    for (auto it = assets.begin(); it != assets.end(); ++it)
-    {
-        QByteArray keyUtf8 = it.key().toUtf8();
-        stream << static_cast<quint32>(keyUtf8.size());
-        stream.writeRawData(keyUtf8.constData(), keyUtf8.size());
-
-        stream << static_cast<quint32>(it.value().size());
-        stream.writeRawData(it.value().constData(), it.value().size());
-    }
-
-    outFile.close();
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// Resolve relative paths in JSON against a base directory.
-// Used when loading a folder-exported scene.json.
-// ---------------------------------------------------------------------------
-
-QByteArray SceneExporter::ResolveJsonPaths(const QByteArray& json, const QString& baseDir)
-{
-    QJsonParseError err;
-    QJsonDocument jdoc = QJsonDocument::fromJson(json, &err);
-    if (err.error != QJsonParseError::NoError || !jdoc.isObject())
-        return json;
-
-    QJsonObject rootObj = jdoc.object();
-
-    // Collect all path values that are relative
-    QSet<QString> relativePaths;
-    CollectAssetPaths(rootObj, relativePaths);
-
-    // Build mapping: relative -> absolute
-    QMap<QString, QString> mapping;
-    for (const QString& p : relativePaths)
-    {
-        if (!QDir::isAbsolutePath(p))
-            mapping[p] = QDir(baseDir).filePath(p);
-    }
-
-    if (mapping.isEmpty())
-        return json;
-
-    QJsonObject resolved = RewritePaths(rootObj, mapping);
-    return QJsonDocument(resolved).toJson(QJsonDocument::Indented);
+    return UiBinWriter::Write(doc, filePath);
 }

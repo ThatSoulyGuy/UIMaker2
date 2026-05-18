@@ -31,6 +31,11 @@ signals:
 
     void PropertyEdited();
 
+    // Emitted when the user establishes the project root (the folder that will
+    // contain scene.json) via the asset browse flow. MainWindow keeps the
+    // active SceneDocument's base directory in sync with this.
+    void ProjectRootChanged(const QString& dir);
+
 private:
 
     void Rebuild();

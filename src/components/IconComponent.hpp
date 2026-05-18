@@ -8,6 +8,7 @@
 #include <QPen>
 
 #include "core/Component.hpp"
+#include "core/AssetContext.hpp"
 
 class IconComponent : public Component
 {
@@ -16,7 +17,8 @@ class IconComponent : public Component
     Q_PROPERTY(QString imagePath READ GetImagePath WRITE SetImagePath NOTIFY ComponentChanged)
     Q_PROPERTY(QColor tintColor READ GetTintColor WRITE SetTintColor NOTIFY ComponentChanged)
     Q_PROPERTY(int iconSize READ GetIconSize WRITE SetIconSize NOTIFY ComponentChanged)
-    Q_PROPERTY(QString assetPath READ GetAssetPath WRITE SetAssetPath NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetDomain READ GetAssetDomain WRITE SetAssetDomain NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetRegistryValue READ GetAssetRegistryValue WRITE SetAssetRegistryValue NOTIFY ComponentChanged)
 
 public:
 
@@ -83,7 +85,7 @@ public:
         m_pixmap = QPixmap();
         if (!m_imagePath.isEmpty())
         {
-            QPixmap loaded(m_imagePath);
+            QPixmap loaded(AssetContext::Resolve(m_imagePath));
             if (!loaded.isNull())
                 m_pixmap = loaded;
         }
@@ -96,8 +98,11 @@ public:
     int GetIconSize() const noexcept { return m_iconSize; }
     void SetIconSize(int v) { if (m_iconSize == v) return; m_iconSize = v; NotifyChanged(); }
 
-    QString GetAssetPath() const noexcept { return m_assetPath; }
-    void SetAssetPath(const QString& v) { if (m_assetPath == v) return; m_assetPath = v; NotifyChanged(); }
+    QString GetAssetDomain() const noexcept { return m_assetDomain; }
+    void SetAssetDomain(const QString& v) { if (m_assetDomain == v) return; m_assetDomain = v; NotifyChanged(); }
+
+    QString GetAssetRegistryValue() const noexcept { return m_assetRegistryValue; }
+    void SetAssetRegistryValue(const QString& v) { if (m_assetRegistryValue == v) return; m_assetRegistryValue = v; NotifyChanged(); }
 
     void ToJson(QJsonObject& out) const override
     {
@@ -105,7 +110,8 @@ public:
         out["imagePath"] = m_imagePath;
         out["tintColor"] = m_tintColor.name(QColor::HexArgb);
         out["iconSize"] = m_iconSize;
-        out["assetPath"] = m_assetPath;
+        out["assetDomain"] = m_assetDomain;
+        out["assetRegistryValue"] = m_assetRegistryValue;
     }
 
     void FromJson(const QJsonObject& in) override
@@ -113,7 +119,8 @@ public:
         SetImagePath(in["imagePath"].toString());
         SetTintColor(QColor(in["tintColor"].toString("#FFFFFFFF")));
         SetIconSize(in["iconSize"].toInt(32));
-        SetAssetPath(in["assetPath"].toString());
+        SetAssetDomain(in["assetDomain"].toString());
+        SetAssetRegistryValue(in["assetRegistryValue"].toString());
     }
 
 private:
@@ -121,7 +128,8 @@ private:
     QString m_imagePath;
     QColor m_tintColor;
     int m_iconSize;
-    QString m_assetPath;
+    QString m_assetDomain;
+    QString m_assetRegistryValue;
     QPixmap m_pixmap;
 };
 

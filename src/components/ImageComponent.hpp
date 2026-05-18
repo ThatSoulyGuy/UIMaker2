@@ -8,13 +8,15 @@
 #include <QPen>
 
 #include "core/Component.hpp"
+#include "core/AssetContext.hpp"
 
 class ImageComponent : public Component
 {
     Q_OBJECT
     Q_PROPERTY(QString imagePath READ GetImagePath WRITE SetImagePath NOTIFY ComponentChanged)
     Q_PROPERTY(QColor tint READ GetTint WRITE SetTint NOTIFY ComponentChanged)
-    Q_PROPERTY(QString assetPath READ GetAssetPath WRITE SetAssetPath NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetDomain READ GetAssetDomain WRITE SetAssetDomain NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetRegistryValue READ GetAssetRegistryValue WRITE SetAssetRegistryValue NOTIFY ComponentChanged)
     Q_PROPERTY(bool pixelated READ IsPixelated WRITE SetPixelated NOTIFY ComponentChanged)
 
 public:
@@ -33,7 +35,7 @@ public:
 
         if (!imagePath.isEmpty())
         {
-            QPixmap loaded(imagePath);
+            QPixmap loaded(AssetContext::Resolve(imagePath));
 
             if (!loaded.isNull())
             {
@@ -80,17 +82,32 @@ public:
         NotifyChanged();
     }
 
-    QString GetAssetPath() const noexcept
+    QString GetAssetDomain() const noexcept
     {
-        return assetPath;
+        return assetDomain;
     }
 
-    void SetAssetPath(const QString& v)
+    void SetAssetDomain(const QString& v)
     {
-        if (assetPath == v)
+        if (assetDomain == v)
             return;
 
-        assetPath = v;
+        assetDomain = v;
+
+        NotifyChanged();
+    }
+
+    QString GetAssetRegistryValue() const noexcept
+    {
+        return assetRegistryValue;
+    }
+
+    void SetAssetRegistryValue(const QString& v)
+    {
+        if (assetRegistryValue == v)
+            return;
+
+        assetRegistryValue = v;
 
         NotifyChanged();
     }
@@ -130,7 +147,8 @@ public:
         out["kind"] = "Image";
         out["imagePath"] = imagePath;
         out["tint"] = tint.name(QColor::HexArgb);
-        out["assetPath"] = assetPath;
+        out["assetDomain"] = assetDomain;
+        out["assetRegistryValue"] = assetRegistryValue;
         out["pixelated"] = pixelated;
     }
 
@@ -138,7 +156,8 @@ public:
     {
         SetImagePath(in["imagePath"].toString());
         SetTint(QColor(in["tint"].toString("#FFFFFFFF")));
-        SetAssetPath(in["assetPath"].toString());
+        SetAssetDomain(in["assetDomain"].toString());
+        SetAssetRegistryValue(in["assetRegistryValue"].toString());
         SetPixelated(in["pixelated"].toBool(false));
     }
 
@@ -147,7 +166,8 @@ private:
 
     QString imagePath;
     QColor tint;
-    QString assetPath;
+    QString assetDomain;
+    QString assetRegistryValue;
     bool pixelated;
     QPixmap pixmap;
 

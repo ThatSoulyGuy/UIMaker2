@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "core/Component.hpp"
+#include "core/AssetContext.hpp"
 
 class SpriteComponent : public Component
 {
@@ -20,7 +21,8 @@ class SpriteComponent : public Component
     Q_PROPERTY(int frameCount READ GetFrameCount WRITE SetFrameCount NOTIFY ComponentChanged)
     Q_PROPERTY(int currentFrame READ GetCurrentFrame WRITE SetCurrentFrame NOTIFY ComponentChanged)
     Q_PROPERTY(int columns READ GetColumns WRITE SetColumns NOTIFY ComponentChanged)
-    Q_PROPERTY(QString assetPath READ GetAssetPath WRITE SetAssetPath NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetDomain READ GetAssetDomain WRITE SetAssetDomain NOTIFY ComponentChanged)
+    Q_PROPERTY(QString assetRegistryValue READ GetAssetRegistryValue WRITE SetAssetRegistryValue NOTIFY ComponentChanged)
 
 public:
 
@@ -95,7 +97,7 @@ public:
         m_pixmap = QPixmap();
         if (!m_imagePath.isEmpty())
         {
-            QPixmap loaded(m_imagePath);
+            QPixmap loaded(AssetContext::Resolve(m_imagePath));
             if (!loaded.isNull())
                 m_pixmap = loaded;
         }
@@ -117,8 +119,11 @@ public:
     int GetColumns() const noexcept { return m_columns; }
     void SetColumns(int v) { v = std::max(1, v); if (m_columns == v) return; m_columns = v; NotifyChanged(); }
 
-    QString GetAssetPath() const noexcept { return m_assetPath; }
-    void SetAssetPath(const QString& v) { if (m_assetPath == v) return; m_assetPath = v; NotifyChanged(); }
+    QString GetAssetDomain() const noexcept { return m_assetDomain; }
+    void SetAssetDomain(const QString& v) { if (m_assetDomain == v) return; m_assetDomain = v; NotifyChanged(); }
+
+    QString GetAssetRegistryValue() const noexcept { return m_assetRegistryValue; }
+    void SetAssetRegistryValue(const QString& v) { if (m_assetRegistryValue == v) return; m_assetRegistryValue = v; NotifyChanged(); }
 
     void ToJson(QJsonObject& out) const override
     {
@@ -129,7 +134,8 @@ public:
         out["frameCount"] = m_frameCount;
         out["currentFrame"] = m_currentFrame;
         out["columns"] = m_columns;
-        out["assetPath"] = m_assetPath;
+        out["assetDomain"] = m_assetDomain;
+        out["assetRegistryValue"] = m_assetRegistryValue;
     }
 
     void FromJson(const QJsonObject& in) override
@@ -140,7 +146,8 @@ public:
         SetFrameCount(in["frameCount"].toInt(1));
         SetCurrentFrame(in["currentFrame"].toInt(0));
         SetColumns(in["columns"].toInt(1));
-        SetAssetPath(in["assetPath"].toString());
+        SetAssetDomain(in["assetDomain"].toString());
+        SetAssetRegistryValue(in["assetRegistryValue"].toString());
     }
 
 private:
@@ -151,7 +158,8 @@ private:
     int m_frameCount;
     int m_currentFrame;
     int m_columns;
-    QString m_assetPath;
+    QString m_assetDomain;
+    QString m_assetRegistryValue;
     QPixmap m_pixmap;
 };
 
