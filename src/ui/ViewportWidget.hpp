@@ -82,7 +82,7 @@ public:
 
 signals:
 
-    void TransformCompleted(const QByteArray& beforeState, const QByteArray& afterState, const QString& actionName);
+    void TransformCompleted(const QList<TransformDelta>& deltas, const QString& actionName);
 
 protected:
 
@@ -277,9 +277,9 @@ protected:
 
 private slots:
 
-    void onTransformEnded(const QByteArray& before, const QByteArray& after, const QString& actionName)
+    void onTransformEnded(const QList<TransformDelta>& deltas, const QString& actionName)
     {
-        emit TransformCompleted(before, after, actionName);
+        emit TransformCompleted(deltas, actionName);
     }
 
 private:

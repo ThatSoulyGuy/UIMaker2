@@ -84,3 +84,7 @@ CMakeLists.txt.user
 .uic/
 /build/
 /build-*/
+
+# Atomic-write temp artifacts (editors/tools write to *.tmp.<pid>.<hash>
+# before renaming over the real file - never meant to be tracked)
+*.tmp.*

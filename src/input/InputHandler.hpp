@@ -8,6 +8,7 @@
 
 #include "input/EditorContext.hpp"
 #include "input/InputEvents.hpp"
+#include "scene/TransformDelta.hpp"
 
 struct InputResult
 {
@@ -89,7 +90,7 @@ signals:
 
     void TransformStarted();
     void TransformUpdated();
-    void TransformEnded(const QByteArray& beforeState, const QByteArray& afterState, const QString& actionName);
+    void TransformEnded(const QList<TransformDelta>& deltas, const QString& actionName);
     void TransformCancelled();
 
 };

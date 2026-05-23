@@ -560,6 +560,24 @@ UiElement* SceneDocument::GetPrimarySelection() const
     return sel.isEmpty() ? nullptr : sel.last();
 }
 
+UiElement* SceneDocument::FindById(const QUuid& id) const
+{
+    if (!root || id.isNull())
+        return nullptr;
+
+    if (root->GetId() == id)
+        return root;
+
+    // findChildren is recursive across all QObject descendants.
+    for (UiElement* e : root->findChildren<UiElement*>())
+    {
+        if (e && e->GetId() == id)
+            return e;
+    }
+
+    return nullptr;
+}
+
 void SceneDocument::OnSceneSelectionChanged()
 {
     if (m_syncingSelection)

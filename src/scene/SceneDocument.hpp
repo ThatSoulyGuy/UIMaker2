@@ -100,6 +100,11 @@ public:
     QList<UiElement*> GetSelectedElements() const;
     UiElement* GetPrimarySelection() const;
 
+    // Locate an element anywhere in the tree by its persistent UUID. Used by
+    // the delta-based undo/redo commands, which survive across undo cycles
+    // because UUIDs are preserved (CreateElementFromJson with preserveIds).
+    UiElement* FindById(const QUuid& id) const;
+
 signals:
 
     void SelectionChanged(const QList<UiElement*>& selected);

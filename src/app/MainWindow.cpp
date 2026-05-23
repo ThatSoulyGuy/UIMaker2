@@ -21,6 +21,10 @@
 
 MainWindow* MainWindow::s_instance = nullptr;
 
+// Whole-scene snapshot command. Retained as a fallback (e.g. for the menu
+// "Load" path or other future blanket replacements); the interactive editor
+// flows have moved to the delta-based commands below, which avoid the full
+// scene rebuild that made big hierarchies freeze on mouseup.
 class JsonSceneCommand : public QUndoCommand
 {
 
@@ -36,6 +40,12 @@ public:
 
     void redo() override
     {
+        if (firstRedo)
+        {
+            firstRedo = false;
+            return;
+        }
+
         if (mw)
             mw->ApplySceneJson(after);
     }
@@ -44,7 +54,197 @@ private:
 
     MainWindow* mw;
     QByteArray before, after;
+    bool firstRedo = true;
 };
+
+// Apply a TransformDelta to whichever element currently carries its id. Used
+// by both undo() (applies the "before" pose) and redo() (the "after" pose).
+// Touches only the affected elements - no scene rebuild - which is the whole
+// point of the delta model.
+static void ApplyTransformDelta(SceneDocument* doc, const TransformDelta& d, bool useAfter)
+{
+    if (!doc)
+        return;
+
+    UiElement* el = doc->FindById(d.id);
+    if (!el)
+        return;
+
+    auto* xform = el->GetComponent<TransformComponent>();
+    if (!xform)
+        return;
+
+    if (useAfter)
+    {
+        xform->SetPosition(d.afterPos);
+        xform->SetRotationDegrees(d.afterRotation);
+        xform->SetScale(d.afterScale);
+    }
+    else
+    {
+        xform->SetPosition(d.beforePos);
+        xform->SetRotationDegrees(d.beforeRotation);
+        xform->SetScale(d.beforeScale);
+    }
+}
+
+// Delta-based undo command for gizmo transforms (translate/rotate/scale).
+// Stores only the affected elements' (before, after) pose pairs keyed by
+// UUID. undo/redo do O(touched elements) work and never rebuild the scene.
+// The first redo() is a no-op because the drag handler already applied the
+// "after" pose live on the document by the time the command is pushed.
+class TransformDeltaCommand : public QUndoCommand
+{
+
+public:
+
+    TransformDeltaCommand(SceneDocument* doc, QList<TransformDelta> deltas, QString text)
+        : QUndoCommand(std::move(text)), doc(doc), deltas(std::move(deltas)) { }
+
+    void undo() override
+    {
+        for (const TransformDelta& d : deltas)
+            ApplyTransformDelta(doc, d, /*useAfter=*/false);
+    }
+
+    void redo() override
+    {
+        if (firstRedo)
+        {
+            firstRedo = false;
+            return;
+        }
+
+        for (const TransformDelta& d : deltas)
+            ApplyTransformDelta(doc, d, /*useAfter=*/true);
+    }
+
+private:
+
+    SceneDocument* doc;
+    QList<TransformDelta> deltas;
+    bool firstRedo = true;
+};
+
+// One add-or-remove inside a StructuralCommand.
+//
+//   kind=Add    : on redo, recreate the subtree at (parentId, row) from json,
+//                 preserving the recorded id; on undo, delete it by id.
+//   kind=Remove : on redo, delete the element with this id; on undo, recreate
+//                 the subtree at (parentId, row) from json, preserving the id.
+//
+// json is the FULL subtree serialisation, so recreate restores all descendants
+// in one pass. row is the index in the parent's child list at the moment the
+// op was recorded - on recreate the element is moved to that row via
+// UiElement::ReparentTo which clamps to current child count.
+struct StructuralOp
+{
+    enum Kind { Add, Remove };
+    Kind        kind   = Add;
+    QUuid       id;
+    QUuid       parentId;
+    int         row    = 0;
+    QJsonObject json;
+};
+
+// Helper: recreate a subtree from json at (parent, row) preserving the id.
+// Used by both Add::redo() and Remove::undo() - the operations are symmetric.
+static UiElement* RecreateSubtree(SceneDocument* doc, const QJsonObject& json,
+                                  const QUuid& parentId, int row)
+{
+    if (!doc)
+        return nullptr;
+
+    UiElement* parent = parentId.isNull() ? doc->GetRoot() : doc->FindById(parentId);
+    if (!parent)
+        parent = doc->GetRoot();
+    if (!parent)
+        return nullptr;
+
+    UiElement* created = doc->CreateElementFromJson(json, parent, /*preserveIds=*/true);
+    if (created && row >= 0)
+        created->ReparentTo(parent, row);
+
+    return created;
+}
+
+// Helper: delete the element currently carrying this id.
+static void RemoveById(SceneDocument* doc, const QUuid& id)
+{
+    if (!doc)
+        return;
+    if (UiElement* el = doc->FindById(id))
+        doc->DeleteElement(el);
+}
+
+// Delta-based undo command for structural changes (paste, cut, duplicate,
+// delete - eventually reparent). Stores a list of StructuralOps recorded in
+// the order they were performed. redo() replays forward, undo() walks the
+// same list and applies the inverse of each op.
+//
+// Forward iteration on undo is deliberate: for Remove ops whose recreation
+// uses recorded row indices, the rows are captured in ascending order at
+// record time and walking forward keeps insertion math consistent. For Add
+// ops the inverse (delete-by-id) is order-independent so forward iteration
+// is fine there too.
+class StructuralCommand : public QUndoCommand
+{
+
+public:
+
+    StructuralCommand(SceneDocument* doc, QList<StructuralOp> ops, QString text)
+        : QUndoCommand(std::move(text)), doc(doc), ops(std::move(ops)) { }
+
+    void undo() override
+    {
+        for (const StructuralOp& op : ops)
+        {
+            if (op.kind == StructuralOp::Add)
+                RemoveById(doc, op.id);
+            else
+                RecreateSubtree(doc, op.json, op.parentId, op.row);
+        }
+    }
+
+    void redo() override
+    {
+        if (firstRedo)
+        {
+            firstRedo = false;
+            return;
+        }
+
+        for (const StructuralOp& op : ops)
+        {
+            if (op.kind == StructuralOp::Add)
+                RecreateSubtree(doc, op.json, op.parentId, op.row);
+            else
+                RemoveById(doc, op.id);
+        }
+    }
+
+private:
+
+    SceneDocument* doc;
+    QList<StructuralOp> ops;
+    bool firstRedo = true;
+};
+
+// Raw position of this element in its parent's QObject children list. This
+// matches the index space that UiElement::ReparentTo expects for insertPos -
+// it includes the parent's own Components, which sit before any child
+// UiElements. Capture and replay use the same index space, so the value is
+// stable across delete+recreate as long as the parent's component set is
+// unchanged between the two (which is the steady-state in this editor).
+static int RowInParent(UiElement* e)
+{
+    if (!e)
+        return -1;
+    auto* parent = qobject_cast<UiElement*>(e->parent());
+    if (!parent)
+        return -1;
+    return parent->children().indexOf(e);
+}
 
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::UIMaker2)
@@ -176,13 +376,16 @@ void MainWindow::ApplySceneJson(const QByteArray& bytes)
     }
 }
 
-void MainWindow::onTransformCompleted(const QByteArray& before, const QByteArray& after, const QString& actionName)
+void MainWindow::onTransformCompleted(const QList<TransformDelta>& deltas, const QString& actionName)
 {
-    if (before != after)
-    {
-        ApplySceneJson(before);
-        undoStack->push(new JsonSceneCommand(this, before, after, actionName));
-    }
+    if (deltas.isEmpty())
+        return;
+
+    // The drag handler already applied the "after" pose live on every affected
+    // element. The command stores per-element (before, after) pose pairs keyed
+    // by UUID, so undo/redo touch only those elements and never rebuild the
+    // scene. First redo() is a no-op (the change is already live).
+    undoStack->push(new TransformDeltaCommand(document, deltas, actionName));
 }
 
 void MainWindow::BuildHierarchyDock()
@@ -660,18 +863,31 @@ void MainWindow::DoPaste()
     if (arr.isEmpty())
         return;
 
-    const QByteArray before = document->ExportJson();
-
+    // Create each element, then re-serialise it to capture the canonical JSON
+    // including its freshly-assigned id. We record an Add op per created
+    // top-level element so undo can delete-by-id and redo can recreate at the
+    // same (parent, row) with the same id.
+    QList<StructuralOp> ops;
     for (const QJsonValue& v : arr)
     {
-        if (v.isObject())
-            document->CreateElementFromJson(v.toObject(), parent);
+        if (!v.isObject())
+            continue;
+
+        UiElement* created = document->CreateElementFromJson(v.toObject(), parent);
+        if (!created)
+            continue;
+
+        StructuralOp op;
+        op.kind     = StructuralOp::Add;
+        op.id       = created->GetId();
+        op.parentId = parent ? parent->GetId() : QUuid();
+        op.row      = RowInParent(created);
+        created->ToJson(op.json);
+        ops.append(op);
     }
 
-    const QByteArray after = document->ExportJson();
-
-    ApplySceneJson(before);
-    undoStack->push(new JsonSceneCommand(this, before, after, "Paste"));
+    if (!ops.isEmpty())
+        undoStack->push(new StructuralCommand(document, ops, "Paste"));
 }
 
 void MainWindow::DoCut()
@@ -683,14 +899,29 @@ void MainWindow::DoCut()
 
     DoCopy();
 
-    const QByteArray before = document->ExportJson();
+    // Snapshot each subtree (json + parent + row) BEFORE deletion so undo can
+    // recreate them at their original locations.
+    QList<StructuralOp> ops;
+    for (UiElement* e : targets)
+    {
+        if (!e)
+            continue;
+
+        StructuralOp op;
+        op.kind     = StructuralOp::Remove;
+        op.id       = e->GetId();
+        auto* p     = qobject_cast<UiElement*>(e->parent());
+        op.parentId = p ? p->GetId() : QUuid();
+        op.row      = RowInParent(e);
+        e->ToJson(op.json);
+        ops.append(op);
+    }
+
     for (UiElement* e : targets)
         document->DeleteElement(e);
-    const QByteArray after  = document->ExportJson();
 
-    ApplySceneJson(before);
-
-    undoStack->push(new JsonSceneCommand(this, before, after, "Cut"));
+    if (!ops.isEmpty())
+        undoStack->push(new StructuralCommand(document, ops, "Cut"));
 }
 
 void MainWindow::DoDuplicate()
@@ -700,8 +931,7 @@ void MainWindow::DoDuplicate()
     if (targets.isEmpty())
         return;
 
-    const QByteArray before = document->ExportJson();
-
+    QList<StructuralOp> ops;
     for (UiElement* e : targets)
     {
         QJsonObject obj;
@@ -712,20 +942,25 @@ void MainWindow::DoDuplicate()
             parent = document->GetRoot();
 
         UiElement* dup = document->CreateElementFromJson(obj, parent);
+        if (!dup)
+            continue;
 
-        if (dup)
-        {
-            if (auto* t = dup->GetComponent<TransformComponent>())
-                t->SetPosition(t->GetPosition() + QPointF(20.0, 20.0));
+        if (auto* t = dup->GetComponent<TransformComponent>())
+            t->SetPosition(t->GetPosition() + QPointF(20.0, 20.0));
 
-            dup->SetName(e->GetName() + " Copy");
-        }
+        dup->SetName(e->GetName() + " Copy");
+
+        StructuralOp op;
+        op.kind     = StructuralOp::Add;
+        op.id       = dup->GetId();
+        op.parentId = parent->GetId();
+        op.row      = RowInParent(dup);
+        dup->ToJson(op.json);
+        ops.append(op);
     }
 
-    const QByteArray after = document->ExportJson();
-
-    ApplySceneJson(before);
-    undoStack->push(new JsonSceneCommand(this, before, after, "Duplicate"));
+    if (!ops.isEmpty())
+        undoStack->push(new StructuralCommand(document, ops, "Duplicate"));
 }
 
 void MainWindow::DoDelete()
@@ -735,13 +970,30 @@ void MainWindow::DoDelete()
     if (targets.isEmpty())
         return;
 
-    const QByteArray before = document->ExportJson();
+    // Snapshot subtrees first (ascending row order is preserved by walking
+    // SelectedElements in the order Qt returned them; we rely on that for
+    // correct re-insertion on undo). Then perform the deletions.
+    QList<StructuralOp> ops;
+    for (UiElement* e : targets)
+    {
+        if (!e)
+            continue;
+
+        StructuralOp op;
+        op.kind     = StructuralOp::Remove;
+        op.id       = e->GetId();
+        auto* p     = qobject_cast<UiElement*>(e->parent());
+        op.parentId = p ? p->GetId() : QUuid();
+        op.row      = RowInParent(e);
+        e->ToJson(op.json);
+        ops.append(op);
+    }
+
     for (UiElement* e : targets)
         document->DeleteElement(e);
-    const QByteArray after  = document->ExportJson();
 
-    ApplySceneJson(before);
-    undoStack->push(new JsonSceneCommand(this, before, after, "Delete"));
+    if (!ops.isEmpty())
+        undoStack->push(new StructuralCommand(document, ops, "Delete"));
 }
 
 void MainWindow::DoUndo()

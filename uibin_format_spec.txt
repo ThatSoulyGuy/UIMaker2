@@ -1,5 +1,5 @@
 ================================================================================
-  .uibin File Format Specification  (Version 3)
+  .uibin File Format Specification  (Version 4)
 ================================================================================
 
 A .uibin file is a self-contained, binary-packed UI scene produced by
@@ -41,26 +41,69 @@ top-to-bottom from this file alone.
     walk past a component type or field tag it does not understand instead of
     failing.
 
+  * Eyeball-opaque body. Every byte after the 32-byte header is run through a
+    deterministic XOR stream (see section 2a) so a hex dump shows noise -
+    no component names, no PNG/TTF magic bytes, no element names. The header
+    stays in the clear so a loader can locate sections without demasking.
+    This is cosmetic obfuscation, not cryptography: anyone with the spec or
+    the source can decode the file. It exists only to keep baked content
+    from being casually readable.
+
 
 --------------------------------------------------------------------------------
   2. How a runtime loads a .uibin (the whole procedure)
 --------------------------------------------------------------------------------
 
-  1. Read the 32-byte header. Verify magic == "UIB3" and version == 3. Reject
+  1. Read the 32-byte header. Verify magic == "UIB4" and version == 4. Reject
      otherwise. Keep the four section offsets and three counts.
-  2. Seek to stringTableOffset. Read [stringCount] entries into an array
+  2. Demask everything from offset 32 to EOF in place (or into a working
+     buffer) using the XOR stream described in section 2a. The header is
+     already in the clear; do NOT demask the first 32 bytes. From this
+     point on, treat the demasked bytes as the file you are parsing.
+  3. Seek to stringTableOffset. Read [stringCount] entries into an array
      indexed by id (id 0 will be ""). This array is your decode dictionary.
-  3. Seek to assetTableOffset. Read [assetCount] records into an array indexed
+  4. Seek to assetTableOffset. Read [assetCount] records into an array indexed
      by asset index. Resolve string ids to get each asset's domain/registry.
      Either register the embedded bytes with your texture/font system now, or
      keep them lazily and resolve on first use.
-  4. Seek to treeOffset. Decode exactly one Element (recursive, pre-order).
+  5. Seek to treeOffset. Decode exactly one Element (recursive, pre-order).
      For each component, instantiate it by its type-name string, then apply
      each field to the instance (see section 7).
-  5. The decoded Element tree is your live UI hierarchy.
+  6. The decoded Element tree is your live UI hierarchy.
 
 Sections never overlap and always appear in this order, but you should always
 trust the header offsets rather than assume adjacency.
+
+
+--------------------------------------------------------------------------------
+  2a. The XOR mask  (applied to all bytes after the header)
+--------------------------------------------------------------------------------
+
+  Every byte in the file from offset 32 onwards is XORed with a stream
+  produced by this linear-congruential generator. Writer and reader run the
+  identical routine; XOR is self-inverse so one call encodes and the other
+  decodes.
+
+      uint32 s = 0x5BC8A93D                       // seed (constant)
+      for i in 0 .. n-1:
+          s = (s * 1103515245 + 12345) mod 2^32   // glibc rand() LCG
+          data[i] ^= uint8(s >> 16)               // high byte of state
+
+  The seed is fixed; the stream depends only on byte position within the
+  masked region (offset 0 of the stream = file offset 32). String table,
+  asset table, and element tree are masked as one contiguous run - do NOT
+  reset the generator between sections.
+
+  Why this exists. Without the mask, baked files leak readable property
+  names ("position", "imagePath"), component names ("Transform", "Button"),
+  element names from the editor, and recognisable file signatures inside
+  the asset table (e.g. PNG's "\x89PNG", TTF version bytes). With the mask
+  applied, every byte after the header is indistinguishable from random
+  noise in a hex dump.
+
+  What this is NOT. It is not encryption. The seed and algorithm are right
+  here; anyone with this document or the source can reverse the mask. The
+  goal is "not casually eyeballable", not secrecy.
 
 
 --------------------------------------------------------------------------------
@@ -69,8 +112,8 @@ trust the header offsets rather than assume adjacency.
 
   Offset  Size  Type    Description
   ------  ----  ------  ------------------------------------------------------
-  0       4     char[4] Magic bytes: ASCII "UIB3"
-  4       2     u16     Format version (currently 3)
+  0       4     char[4] Magic bytes: ASCII "UIB4"
+  4       2     u16     Format version (currently 4)
   6       2     u16     Flags (currently 0; all bits reserved, must be 0)
   8       4     u32     String table offset  (always 32)
   12      4     u32     String count
@@ -80,13 +123,16 @@ trust the header offsets rather than assume adjacency.
   28      4     u32     Total file size in bytes
 
   What it's for: a self-describing directory of the file. Because every
-  section's start is here, a loader needs no preliminary scan.
+  section's start is here, a loader needs no preliminary scan. The header
+  is also the only part of the file that is NOT XOR-masked (see section
+  2a), so these 32 bytes are recoverable straight from disk.
 
-  How to use it: validate magic+version first. Earlier formats (v1's JSON
-  blob, v2's binary layout) must be rejected - v3 is not backward compatible
-  and a loader must not attempt a best-effort parse of a mismatched version.
-  Treat the offsets as authoritative. Use "Total file size" as a sanity check:
-  if it does not equal the actual file length the file is truncated/corrupt.
+  How to use it: validate magic+version first, BEFORE demasking. Earlier
+  formats (v1 JSON blob, v2 binary layout, v3 cleartext binary) must be
+  rejected - v4 is not backward compatible and a loader must not attempt a
+  best-effort parse of a mismatched version. Treat the offsets as
+  authoritative. Use "Total file size" as a sanity check: if it does not
+  equal the actual file length the file is truncated/corrupt.
 
 
 --------------------------------------------------------------------------------
@@ -265,13 +311,94 @@ trust the header offsets rather than assume adjacency.
   floating-point->DOUBLE, enum/flags->INT32, QColor->COLOR, point->POINT,
   string->STRING, anything else stringifiable->STRING, otherwise NONE.
 
+  Note on flags: enum AND bit-flag properties both emit as INT32. A flags
+  field carries the raw bitmask integer (not a list of set bits); decode it
+  by testing bits.
+
+
+--------------------------------------------------------------------------------
+  8a. Transform component fields  (always present on every element)
+--------------------------------------------------------------------------------
+
+  Every Element has exactly one "Transform" component. It is the element's
+  geometry and is emitted with these fields (names are the property-name
+  string ids; order is not guaranteed - dispatch on the name):
+
+  Field name       Tag     Meaning
+  ---------------  ------  --------------------------------------------------
+  position         POINT   (x, y) offset, in pixels, relative to the parent
+  scale            POINT   (width, height) BASE size in pixels - NOT a factor
+  rotationDegrees  DOUBLE  rotation about the element center, degrees
+  anchors          INT32   anchor bitmask (see "Anchor / Stretch flags")
+  stretch          INT32   stretch bitmask (LEFT|RIGHT = fill width, etc.)
+
+  All five are always written. position and scale are single POINT fields
+  (two f64s each) - there are no separate x / y / scaleX / scaleY scalar
+  fields in v3. anchors and stretch are plain INT32 bitmasks; a value of 0
+  means "no flags" (stretch defaults to 0; anchors defaults to 5 = LEFT|TOP).
+  See section 8b for the flag values and how scale/anchors resolve.
+
+
+--------------------------------------------------------------------------------
+  8b. Anchor / Stretch flags & the sizing model
+--------------------------------------------------------------------------------
+
+  anchors and stretch (and Text.alignment) are bitmasks over these flags:
+
+      NONE     = 0x00
+      LEFT     = 0x01
+      RIGHT    = 0x02
+      TOP      = 0x04
+      BOTTOM   = 0x08
+      CENTER_X = 0x10
+      CENTER_Y = 0x20
+
+  stretch: LEFT|RIGHT (0x03) = fill parent width, TOP|BOTTOM (0x0C) = fill
+  parent height.
+
+  Effective size. scale is only the element's BASE size. The FINAL rendered
+  size is resolved by applying the element's components in order; a content
+  or layout component MAY overwrite it:
+    - Visual components (Text, Image, Button, Icon, Sprite, Toggle, Tooltip,
+      Dropdown, TextInput, ListRepeater, RadialMenu, DragSlot) size to their
+      own intrinsic content and ignore scale.
+    - StackLayout / GridLayout size to fit their children plus padding and
+      ignore scale.
+    - ScrollBox keeps scale only on its scroll axis; the cross axis fits
+      children.
+    - Slot is sized to its parent's rect.
+    - Plain elements (Transform + Panel, or Transform alone) use scale
+      directly.
+
+  Positioning, using the FINAL size (W, H) within the parent rect:
+      LEFT      localX = x
+      RIGHT     localX = parentW - W - x
+      CENTER_X  localX = (parentW - W)/2 + x
+      TOP       localY = y
+      BOTTOM    localY = parentH - H - y
+      CENTER_Y  localY = (parentH - H)/2 + y
+  final pos = parentTopLeft + (localX, localY); then rotate rotationDegrees
+  about the FINAL rect's center. Anchoring/rotation ALWAYS use the final
+  size, never raw scale.
+
+  If the element's parent owns a layout component (StackLayout, GridLayout,
+  ScrollBox), the parent positions this element: its own position / anchors
+  / stretch are ignored for placement (scale still feeds the base size the
+  layout measures). Do not also apply this element's anchors, or it will be
+  double-positioned.
+
 
 --------------------------------------------------------------------------------
   9. Reader requirements (conformance checklist)
 --------------------------------------------------------------------------------
 
-  * Reject the file unless the first 4 bytes are "UIB3" and the version u16
-    equals 3. Do not attempt a "best effort" parse of a mismatched file.
+  * Reject the file unless the first 4 bytes are "UIB4" and the version u16
+    equals 4. Do not attempt a "best effort" parse of a mismatched file.
+  * Validate the magic + version BEFORE demasking. The header bytes (0..31)
+    are NOT masked; everything from offset 32 onwards IS.
+  * Apply the section 2a XOR mask over [32..fileSize) exactly once before
+    reading the string table, asset table, or tree. The mask is its own
+    inverse, so a second pass would re-mask the data.
   * Treat header section offsets as authoritative; never infer them from
     adjacency.
   * Bounds-check every read against the section/file size. A length or offset

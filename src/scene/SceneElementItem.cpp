@@ -118,14 +118,18 @@ void SceneElementItem::RefreshFromComponents()
         setRotationFromComponent(xform->GetRotationDegrees());
     }
 
-    if (newRect != localRect)
+    const bool rectChanged = (newRect != localRect);
+
+    if (rectChanged)
     {
         prepareGeometryChange();
         localRect = newRect;
 
         // Upward cascade: if our parent owns a layout component, re-run the parent's layout
-        // so children get repositioned given our new size.
-        if (!inLayoutRefresh)
+        // so siblings (and us) get repositioned given the new sizes. Skipped when this
+        // refresh was itself triggered as part of a parent->child downward cascade, to
+        // prevent ping-ponging between parent and child refreshes.
+        if (!inLayoutRefresh && !inDownwardCascade)
         {
             if (auto* parentSEI = dynamic_cast<SceneElementItem*>(parentItem()))
             {
@@ -144,6 +148,29 @@ void SceneElementItem::RefreshFromComponents()
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // Downward cascade: any change to our committed localRect can shift the
+    // effective size and position of descendants that anchor/stretch against
+    // us (CENTER/RIGHT/BOTTOM anchors, LEFT|RIGHT or TOP|BOTTOM stretch). Walk
+    // direct SEI children and re-run their refresh; the recursive descent is
+    // implicit because each child's refresh fires its own downward cascade.
+    //
+    // The inDownwardCascade flag on the visited children disables their upward
+    // cascade for the duration of the visit - we are the one driving the
+    // resize and don't want it to bounce back into our refresh.
+    if (rectChanged && !inLayoutRefresh)
+    {
+        for (auto* child : childItems())
+        {
+            if (auto* childSEI = dynamic_cast<SceneElementItem*>(child))
+            {
+                childSEI->inDownwardCascade = true;
+                childSEI->RefreshFromComponents();
+                childSEI->update();
+                childSEI->inDownwardCascade = false;
             }
         }
     }

@@ -45,7 +45,6 @@ private:
 
     SceneElementItem* GetSelectedItem(EditorContext& ctx) const;
     TransformComponent* GetTransformComponent(SceneElementItem* item) const;
-    QByteArray CaptureState(EditorContext& ctx) const;
 
     void ApplyTransform(const QPointF& scenePos, const QPointF& sceneDelta);
     void ApplyScale(const ItemStartState& state, const QPointF& scenePos, const QPointF& sceneDelta);
@@ -59,7 +58,6 @@ private:
     QPointF m_startScenePos;
     QPointF m_itemCenter;
     QRectF m_startRect;
-    QByteArray m_startJson;
 
     QList<ItemStartState> m_startStates;
 

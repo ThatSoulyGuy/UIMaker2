@@ -173,7 +173,7 @@ signals:
 
     void ActiveToolChanged(Tool* tool);
     void TransformStarted();
-    void TransformEnded(const QByteArray& beforeState, const QByteArray& afterState, const QString& actionName);
+    void TransformEnded(const QList<TransformDelta>& deltas, const QString& actionName);
     void CursorChanged(Qt::CursorShape cursor);
 
 private slots:
@@ -183,9 +183,9 @@ private slots:
         emit TransformStarted();
     }
 
-    void onTransformEnded(const QByteArray& before, const QByteArray& after, const QString& actionName)
+    void onTransformEnded(const QList<TransformDelta>& deltas, const QString& actionName)
     {
-        emit TransformEnded(before, after, actionName);
+        emit TransformEnded(deltas, actionName);
     }
 
 private:

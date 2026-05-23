@@ -6,27 +6,50 @@
 #include <cstring>
 
 // ===========================================================================
-//  .uibin v2 shared primitives
+//  .uibin v4 shared primitives
 //
 //  This is a deliberately opaque, fixed-layout binary container. It is NOT a
 //  text/JSON-shaped format: every value is positioned by an explicit offset
 //  table and decoded by hand. All scalars are little-endian (native on the
 //  target platforms) so reading is a raw memcpy with no parsing.
 //
+//  Everything after the 32-byte header is also run through a cosmetic XOR
+//  mask (see Obfuscate below) so a hex dump shows noise rather than readable
+//  property/component/element names and recognisable PNG/TTF signatures.
+//
 //  Layout (see uibin_format_spec.txt for the authoritative description):
 //
-//    Header (32 bytes, fixed)
+//    Header (32 bytes, fixed, NOT masked)
 //    String table   : interned UTF-8, referenced everywhere by u32 id
-//    Asset table     : (domainStrId, registryStrId, dataLen, raw bytes)
-//    Element tree     : pre-order; components carry type-tagged TLV fields
+//    Asset table    : (domainStrId, registryStrId, dataLen, raw bytes)
+//    Element tree   : pre-order; components carry type-tagged TLV fields
 // ===========================================================================
 
 namespace uibin
 {
     // Magic + version.
-    static const char   kMagic[4] = { 'U', 'I', 'B', '3' };
-    static const quint16 kVersion = 3;
+    static const char   kMagic[4] = { 'U', 'I', 'B', '4' };
+    static const quint16 kVersion = 4;
     static const quint32 kHeaderSize = 32;
+
+    // Cosmetic obfuscation. Every byte AFTER the 32-byte header is XORed with
+    // a position-coupled LCG stream so a hex dump of a baked file looks like
+    // noise (no readable component names, no PNG signatures, etc.). The header
+    // itself stays clear so a loader can locate sections without demasking.
+    //
+    // This is NOT crypto - anyone with this source can decode the file. Its
+    // sole purpose is to keep the bytes from being eyeball-readable. Writer
+    // and reader call this same function over the same byte range; XOR is
+    // self-inverse so one direction encodes and the other decodes.
+    inline void Obfuscate(char* data, int n)
+    {
+        quint32 s = 0x5BC8A93Du;
+        for (int i = 0; i < n; ++i)
+        {
+            s = s * 1103515245u + 12345u;
+            data[i] = char(quint8(data[i]) ^ quint8(s >> 16));
+        }
+    }
 
     // No-asset sentinel for an ASSET_REF field.
     static const quint32 kNoAsset = 0xFFFFFFFFu;

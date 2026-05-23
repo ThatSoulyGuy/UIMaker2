@@ -73,9 +73,9 @@ InputResult TransformInputHandler::HandlePress(const MousePressEvent& event, Edi
         m_startStates.append(s);
     }
 
-    // Capture state for undo
-    if (ctx.document)
-        m_startJson = CaptureState(ctx);
+    // Per-element start poses are now the undo source of truth; no full-scene
+    // JSON snapshot is taken on press. The delta is built at release time.
+    Q_UNUSED(ctx);
 
     m_gizmoManager->SetActiveHandle(m_activeHandleId);
 
@@ -138,13 +138,39 @@ InputResult TransformInputHandler::HandleRelease(const MouseReleaseEvent& event,
     if (m_gizmoManager)
         m_gizmoManager->ClearActiveHandle();
 
-    // Capture end state
-    QByteArray endJson = CaptureState(ctx);
+    Q_UNUSED(ctx);
 
-    if (m_startJson != endJson)
+    // Build a per-element delta list. Only include elements whose pose
+    // actually changed (skip ones the user grabbed but didn't ultimately
+    // move); if no element changed we emit nothing and the undo stack
+    // gets no entry for this gesture.
+    QList<TransformDelta> deltas;
+    for (const ItemStartState& s : m_startStates)
     {
-        emit TransformEnded(m_startJson, endJson, GetUndoActionName());
+        if (!s.item || !s.xform)
+            continue;
+
+        TransformDelta d;
+        d.id              = s.item->GetElement()->GetId();
+        d.beforePos       = s.startPosition;
+        d.beforeRotation  = s.startRotation;
+        d.beforeScale     = s.startScale;
+        d.afterPos        = s.xform->GetPosition();
+        d.afterRotation   = s.xform->GetRotationDegrees();
+        d.afterScale      = s.xform->GetScale();
+
+        if (d.beforePos == d.afterPos
+            && d.beforeRotation == d.afterRotation
+            && d.beforeScale == d.afterScale)
+        {
+            continue;
+        }
+
+        deltas.append(d);
     }
+
+    if (!deltas.isEmpty())
+        emit TransformEnded(deltas, GetUndoActionName());
 
     m_activeHandleId.clear();
     m_startStates.clear();
@@ -203,14 +229,6 @@ TransformComponent* TransformInputHandler::GetTransformComponent(SceneElementIte
         return nullptr;
 
     return element->GetComponent<TransformComponent>();
-}
-
-QByteArray TransformInputHandler::CaptureState(EditorContext& ctx) const
-{
-    if (!ctx.document)
-        return QByteArray();
-
-    return ctx.document->ExportJson();
 }
 
 void TransformInputHandler::ApplyTransform(const QPointF& scenePos, const QPointF& sceneDelta)
@@ -276,44 +294,53 @@ void TransformInputHandler::ApplyScale(const ItemStartState& s, const QPointF& s
     if (!s.item || !s.xform)
         return;
 
+    // An axis where stretch fills the parent (LEFT|RIGHT or TOP|BOTTOM in the
+    // stretch bitmask) gets its size from parentRect - 2*position, not from
+    // xform.scale. Touching scale on that axis is a no-op for rendering, and
+    // any position compensation would just confuse the user, so we skip the
+    // whole axis for stretched elements.
+    const auto stretchFlags = s.xform->GetStretch();
+    const bool stretchX = stretchFlags.testFlag(Anchor::LEFT) && stretchFlags.testFlag(Anchor::RIGHT);
+    const bool stretchY = stretchFlags.testFlag(Anchor::TOP)  && stretchFlags.testFlag(Anchor::BOTTOM);
+
     double newW = s.startScale.x();
     double newH = s.startScale.y();
 
     if (m_activeHandleId == "scale_right")
     {
-        newW = std::max(10.0, s.startScale.x() + sceneDelta.x());
+        if (!stretchX) newW = std::max(10.0, s.startScale.x() + sceneDelta.x());
     }
     else if (m_activeHandleId == "scale_left")
     {
-        newW = std::max(10.0, s.startScale.x() - sceneDelta.x());
+        if (!stretchX) newW = std::max(10.0, s.startScale.x() - sceneDelta.x());
     }
     else if (m_activeHandleId == "scale_bottom")
     {
-        newH = std::max(10.0, s.startScale.y() + sceneDelta.y());
+        if (!stretchY) newH = std::max(10.0, s.startScale.y() + sceneDelta.y());
     }
     else if (m_activeHandleId == "scale_top")
     {
-        newH = std::max(10.0, s.startScale.y() - sceneDelta.y());
+        if (!stretchY) newH = std::max(10.0, s.startScale.y() - sceneDelta.y());
     }
     else if (m_activeHandleId == "scale_top_left")
     {
-        newW = std::max(10.0, s.startScale.x() - sceneDelta.x());
-        newH = std::max(10.0, s.startScale.y() - sceneDelta.y());
+        if (!stretchX) newW = std::max(10.0, s.startScale.x() - sceneDelta.x());
+        if (!stretchY) newH = std::max(10.0, s.startScale.y() - sceneDelta.y());
     }
     else if (m_activeHandleId == "scale_top_right")
     {
-        newW = std::max(10.0, s.startScale.x() + sceneDelta.x());
-        newH = std::max(10.0, s.startScale.y() - sceneDelta.y());
+        if (!stretchX) newW = std::max(10.0, s.startScale.x() + sceneDelta.x());
+        if (!stretchY) newH = std::max(10.0, s.startScale.y() - sceneDelta.y());
     }
     else if (m_activeHandleId == "scale_bottom_left")
     {
-        newW = std::max(10.0, s.startScale.x() - sceneDelta.x());
-        newH = std::max(10.0, s.startScale.y() + sceneDelta.y());
+        if (!stretchX) newW = std::max(10.0, s.startScale.x() - sceneDelta.x());
+        if (!stretchY) newH = std::max(10.0, s.startScale.y() + sceneDelta.y());
     }
     else if (m_activeHandleId == "scale_bottom_right")
     {
-        newW = std::max(10.0, s.startScale.x() + sceneDelta.x());
-        newH = std::max(10.0, s.startScale.y() + sceneDelta.y());
+        if (!stretchX) newW = std::max(10.0, s.startScale.x() + sceneDelta.x());
+        if (!stretchY) newH = std::max(10.0, s.startScale.y() + sceneDelta.y());
     }
     else if (m_activeHandleId == "scale_uniform")
     {
@@ -324,30 +351,59 @@ void TransformInputHandler::ApplyScale(const ItemStartState& s, const QPointF& s
 
         if (startDist > 1.0)
         {
-            double factor = currentDist / startDist;
-            newW = std::max(10.0, s.startScale.x() * factor);
-            newH = std::max(10.0, s.startScale.y() * factor);
+            const double factor = currentDist / startDist;
+            if (!stretchX) newW = std::max(10.0, s.startScale.x() * factor);
+            if (!stretchY) newH = std::max(10.0, s.startScale.y() * factor);
         }
     }
 
     s.xform->SetScale(QPointF(newW, newH));
 
-    // Adjust position for left-side handles (compensate so the opposite edge stays fixed).
-    if (m_activeHandleId == "scale_left" ||
-        m_activeHandleId == "scale_top_left" ||
-        m_activeHandleId == "scale_bottom_left")
+    // Position compensation for left- and top-side handles. The user expects
+    // the OPPOSITE edge to stay fixed (drag left edge -> right edge stays;
+    // drag top edge -> bottom stays). Translate that intent into a new
+    // xform.position depending on the active anchor on each axis, then write
+    // it DIRECTLY (not via item->setPos). Going through setPos triggers the
+    // ItemPositionHasChanged writeback, which uses the still-stale localRect
+    // dimensions to invert the anchor formula and lands xform.position at the
+    // wrong value for CENTER/BOTTOM/RIGHT anchored elements - that mismatch
+    // is what produced the "scales both ways and keeps walking back" bug.
+    const auto anchors = s.xform->GetAnchors();
+    const bool isLeftSide  = m_activeHandleId == "scale_left"
+                          || m_activeHandleId == "scale_top_left"
+                          || m_activeHandleId == "scale_bottom_left";
+    const bool isTopSide   = m_activeHandleId == "scale_top"
+                          || m_activeHandleId == "scale_top_left"
+                          || m_activeHandleId == "scale_top_right";
+
+    QPointF newPos = s.startPosition;
+
+    if (isLeftSide && !stretchX)
     {
-        double widthDelta = newW - s.startScale.x();
-        s.item->setPos(QPointF(s.startItemPos.x() - widthDelta, s.item->pos().y()));
+        const double dW = newW - s.startScale.x();   // negative when shrinking
+
+        if (anchors.testFlag(Anchor::RIGHT))
+            newPos.setX(s.startPosition.x());        // right edge already pinned
+        else if (anchors.testFlag(Anchor::CENTER_X))
+            newPos.setX(s.startPosition.x() - dW * 0.5);
+        else
+            newPos.setX(s.startPosition.x() - dW);   // LEFT anchor (default)
     }
 
-    if (m_activeHandleId == "scale_top" ||
-        m_activeHandleId == "scale_top_left" ||
-        m_activeHandleId == "scale_top_right")
+    if (isTopSide && !stretchY)
     {
-        double heightDelta = newH - s.startScale.y();
-        s.item->setPos(QPointF(s.item->pos().x(), s.startItemPos.y() - heightDelta));
+        const double dH = newH - s.startScale.y();
+
+        if (anchors.testFlag(Anchor::BOTTOM))
+            newPos.setY(s.startPosition.y());
+        else if (anchors.testFlag(Anchor::CENTER_Y))
+            newPos.setY(s.startPosition.y() - dH * 0.5);
+        else
+            newPos.setY(s.startPosition.y() - dH);   // TOP anchor (default)
     }
+
+    if (newPos != s.startPosition)
+        s.xform->SetPosition(newPos);
 }
 
 QList<SceneElementItem*> TransformInputHandler::GetTopLevelSelectedItems(EditorContext& ctx)

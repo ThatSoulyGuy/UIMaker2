@@ -48,6 +48,7 @@ private:
     QRectF localRect;
     bool pendingRefresh = false;
     bool inLayoutRefresh = false;
+    bool inDownwardCascade = false;
 
     bool ignorePositionFeedback = false;
     bool ignoreRotationFeedback = false;

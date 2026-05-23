@@ -123,14 +123,49 @@ namespace
 
             const QVariant v = comp->property(p.name());
 
-            if (p.isEnumType())
+            // Detect enum AND QFlags properties. p.isEnumType() only returns
+            // true when the flag is registered (Q_ENUM / Q_FLAG) in the SAME
+            // class as the Q_PROPERTY. AnchorFlags lives in EnumHolder, so
+            // TransformComponent's moc never marks its anchors/stretch
+            // properties as enum and they would otherwise fall through to
+            // canConvert<QString>(), which serialises QFlags(0) as "NONE" and
+            // composite bitmasks as "" - both useless to a runtime decoder.
+            //
+            // We also accept the QMetaType::IsEnumeration flag on the value
+            // and a defensive "...Flags" type-name check, which catches the
+            // externally-registered case.
+            const QByteArray typeName(p.typeName());
+            const bool looksLikeFlags = typeName.endsWith("Flags");
+            const bool isEnumOrFlags =
+                p.isEnumType()
+                || (v.metaType().flags() & QMetaType::IsEnumeration)
+                || looksLikeFlags;
+
+            if (isEnumOrFlags)
             {
+                // Q_ENUM converts cleanly via toInt(); externally-registered
+                // QFlags often does not. QFlags<T> is layout-compatible with
+                // its underlying int, so fall back to a direct read of the
+                // stored value when the QVariant conversion fails.
+                bool ok = false;
+                int iv = v.toInt(&ok);
+                if ((!ok || (iv == 0 && v.isValid()))
+                    && v.constData()
+                    && v.metaType().sizeOf() == int(sizeof(int)))
+                {
+                    std::memcpy(&iv, v.constData(), sizeof(int));
+                }
+
                 w.U8(TAG_INT32);
-                w.I32(v.toInt());
+                w.I32(iv);
             }
             else
             {
-                switch (p.metaType().id())
+                // Switch on the VALUE's metatype, not the declared property
+                // metatype: this reliably reports QPointF for Transform.position
+                // and Transform.scale (a stale/odd declared metatype would
+                // otherwise drop them to the stringify fallback).
+                switch (v.metaType().id())
                 {
                 case QMetaType::Bool:
                     w.U8(TAG_BOOL);  w.U8(v.toBool() ? 1 : 0); break;
@@ -260,14 +295,23 @@ bool UiBinWriter::Write(const SceneDocument* doc, const QString& filePath)
     hdr.U32(treeOff);
     hdr.U32(fileSize);
 
+    // Assemble everything that follows the header into a single body buffer
+    // and apply the cosmetic XOR mask so the file is undecipherable in a hex
+    // dump. Header offsets/counts stay clear; a v4 reader demasks the same
+    // range before parsing. See uibin::Obfuscate.
+    QByteArray body;
+    body.reserve(int(fileSize - kHeaderSize));
+    body.append(strW.buffer());
+    body.append(assetW.buffer());
+    body.append(tree.buffer());
+    Obfuscate(body.data(), body.size());
+
     QFile out(filePath);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return false;
 
     out.write(hdr.buffer());
-    out.write(strW.buffer());
-    out.write(assetW.buffer());
-    out.write(tree.buffer());
+    out.write(body);
     out.close();
 
     return true;

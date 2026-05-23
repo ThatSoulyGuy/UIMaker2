@@ -112,10 +112,16 @@ namespace
 
 UiElement* UiBinReader::Read(const QByteArray& bytes)
 {
-    Reader r(bytes.constData(), bytes.size());
-
     if (bytes.size() < int(kHeaderSize) || std::memcmp(bytes.constData(), kMagic, 4) != 0)
         return nullptr;
+
+    // Take a writable copy and demask everything after the header. The header
+    // itself was left clear by the writer so we could locate sections and
+    // validate magic/version before doing any work. See uibin::Obfuscate.
+    QByteArray buf = bytes;
+    Obfuscate(buf.data() + kHeaderSize, buf.size() - int(kHeaderSize));
+
+    Reader r(buf.constData(), buf.size());
 
     r.seek(4);
     const quint16 version = r.U16();

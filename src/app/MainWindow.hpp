@@ -7,6 +7,7 @@
 #include <QToolBar>
 #include <QActionGroup>
 #include "scene/SceneDocument.hpp"
+#include "scene/TransformDelta.hpp"
 #include "ui/EntityTreeModel.hpp"
 #include "ui/PropertyEditorPanel.hpp"
 
@@ -37,7 +38,7 @@ private:
 
 private slots:
 
-    void onTransformCompleted(const QByteArray& before, const QByteArray& after, const QString& actionName);
+    void onTransformCompleted(const QList<TransformDelta>& deltas, const QString& actionName);
 
 private:
 
