@@ -389,6 +389,126 @@ trust the header offsets rather than assume adjacency.
 
 
 --------------------------------------------------------------------------------
+  8c. Text rendering  (Text & Button components)
+--------------------------------------------------------------------------------
+
+  Two component types carry rendered glyph runs: "Text" and "Button". They
+  share the same font-resolution rules; they differ in which other fields
+  they ship and how the run is positioned inside the element's final rect.
+
+  Field set, by component (names are property-name string ids; dispatch on
+  the name - field order is not guaranteed):
+
+    Text:
+      text            STRING     UTF-8 glyph string to render
+      fontFamily      STRING     family hint (see resolution rules below)
+      pixelSize       INT32      glyph cell height in pixels (>= 1)
+      color           COLOR      glyph fill, 0xAARRGGBB, straight (un-premul.)
+      fontPath        ASSET_REF  font asset index (0xFFFFFFFF = no asset)
+      alignment       INT32      anchor-flag bitmask (see below)
+      hasBackground   BOOL       optional opaque backdrop hint (see below)
+
+    Button:
+      text            STRING     UTF-8 glyph string to render (the label)
+      fontFamily      STRING     family hint
+      pixelSize       INT32      glyph cell height in pixels (>= 1)
+      textColor       COLOR      glyph fill, 0xAARRGGBB straight
+      fontPath        ASSET_REF  font asset index (0xFFFFFFFF = no asset)
+      (plus backgroundColor, imagePath, sliceLeft/Top/Right/Bottom for the
+       button skin - those are not part of the text run)
+
+  Both components also resolve their asset's (domain, registryValue) onto
+  the component as "assetDomain"/"assetRegistryValue" properties when the
+  ASSET_REF is non-null (section 8 / TAG_ASSET_REF rule).
+
+  Font resolution. For a single text-rendering component, an engine MUST try
+  these sources in order and use the first one that produces a usable face:
+
+    1. If fontPath != 0xFFFFFFFF: look up assetTable[fontPath]. Resolve
+       (assetDomain, assetRegistryValue) through the engine's font registry.
+       If the registry returns a face, USE THAT FACE - do not override it
+       with fontFamily, even if a system font of that family exists.
+    2. Otherwise, if the same asset record's dataLen > 0: load the embedded
+       bytes (.ttf / .otf, raw file bytes, no header or framing added by the
+       container) into the engine's font system. Cache the resulting face
+       keyed by asset INDEX so multiple components sharing the asset share
+       one decode.
+    3. Otherwise (no asset, or asset present but dataLen == 0): look up
+       fontFamily in the engine's installed-fonts list.
+    4. Otherwise: fall back to the engine's default UI font. Never refuse to
+       render - missing fonts must degrade to a default, not to nothing.
+
+  fontFamily is purely a HINT for steps 3-4. A producer-side "Inter" or
+  "Helvetica" carries no guarantee the consuming machine has it; engines
+  must not error out if it is unknown.
+
+  Pixel size. pixelSize is the GLYPH CELL HEIGHT in pixels, identical to
+  Qt's QFont::setPixelSize / FreeType's FT_Set_Pixel_Sizes(face, 0, pixelSize).
+  It is not a point size and not an EM. Engines MUST set the face's pixel
+  height to this value before measuring or rasterising; they MUST NOT scale
+  the rasterised result to fake the size (kerning and hinting would be wrong).
+  A pixelSize of 0 is invalid; if encountered, clamp to 1.
+
+  Color. COLOR fields hold 0xAARRGGBB with one byte per channel, alpha in
+  the high byte, blue in the low. The channels are STRAIGHT (not premulti-
+  plied); engines that compose in premultiplied space must multiply RGB by
+  A/255 themselves. There is no gamma marker; treat as sRGB.
+
+  Text alignment. Text.alignment is the anchor-flag bitmask from section 8b
+  applied to the glyph RUN INSIDE the element's final rect (not to the
+  element's position - that is Transform.anchors). It is split into two
+  independent groups; engines MUST honour both:
+
+      Horizontal (pick the first set bit; default LEFT if none):
+        LEFT      0x01    left edge of run = left edge of rect
+        CENTER_X  0x10    run is centred horizontally in the rect
+        RIGHT     0x02    right edge of run = right edge of rect
+
+      Vertical   (pick the first set bit; default TOP if none):
+        TOP       0x04    baseline-aware: ascender top = top edge of rect
+        CENTER_Y  0x20    run's visual centre = rect centre
+        BOTTOM    0x08    descender bottom = bottom edge of rect
+
+  Other Anchor bits set on alignment have no meaning and MUST be ignored.
+  Multi-line wrapping is not specified by the format: an engine MAY treat
+  the text as a single line, or wrap to the rect's width with its own rule
+  - the format carries no maxWidth, lineHeight, or wrap-mode field.
+
+  Button has no alignment field. The label is ALWAYS centred both axes
+  inside the (post-9-slice) button rect; engines MUST treat it as
+  CENTER_X | CENTER_Y regardless of any other state.
+
+  hasBackground (Text only). When true, the engine SHOULD draw an opaque
+  backdrop behind the glyph run for legibility. The format carries no
+  backdrop colour, padding, or radius - those are an engine-side style
+  choice (the editor's preview uses a fixed contrast colour). When false,
+  no backdrop is drawn.
+
+  Step-by-step engine procedure for one Text/Button component:
+
+    1. Resolve the final rect for the owning element per section 8b.
+    2. Resolve the face (rules 1-4 above). Cache by asset index.
+    3. Set the face's pixel height to pixelSize (clamped >= 1).
+    4. Shape the "text" string with that face. Engines pick their own
+       shaper (HarfBuzz / DirectWrite / stb_truetype); the container does
+       not specify one.
+    5. Measure the shaped run's bounding box.
+    6. Place the run inside the final rect per alignment (Button = always
+       centred). On overflow, the engine's clipping/wrapping policy applies;
+       the format does not mandate one.
+    7. (Text only) If hasBackground, fill the run's bounding box (engine-
+       chosen padding) with an opaque backdrop before drawing glyphs.
+    8. Rasterise glyphs in the chosen blend mode using color / textColor as
+       straight ARGB.
+
+  Caching guidance. Face objects, glyph atlases, and shaped runs are
+  expensive; engines SHOULD key caches by (asset index, pixelSize) for faces
+  and by (asset index, pixelSize, text, alignment) for shaped runs. The
+  asset index is stable across components that share a font, so this keeps
+  rebuilds rare.
+
+
+--------------------------------------------------------------------------------
   9. Reader requirements (conformance checklist)
 --------------------------------------------------------------------------------
 
