@@ -1,15 +1,15 @@
 #ifndef EDITORCONTEXT_HPP
 #define EDITORCONTEXT_HPP
 
-#include <QGraphicsView>
-#include <QGraphicsScene>
 #include <QList>
 #include <QPointF>
 #include <QPoint>
+#include <QRectF>
 
 class SceneDocument;
 class SceneElementItem;
 class UiElement;
+class QGraphicsView;
 
 class EditorContext
 {
@@ -23,37 +23,13 @@ public:
 
     UiElement* GetSelectedElement() const;
 
-    QPointF MapToScene(const QPoint& viewPos) const
-    {
-        if (view)
-            return view->mapToScene(viewPos);
+    QPointF MapToScene(const QPoint& viewPos) const;
 
-        return QPointF(viewPos);
-    }
+    QPoint MapFromScene(const QPointF& scenePos) const;
 
-    QPoint MapFromScene(const QPointF& scenePos) const
-    {
-        if (view)
-            return view->mapFromScene(scenePos);
+    double GetZoom() const;
 
-        return scenePos.toPoint();
-    }
-
-    double GetZoom() const
-    {
-        if (view)
-            return view->transform().m11();
-
-        return 1.0;
-    }
-
-    QRectF GetVisibleSceneRect() const
-    {
-        if (view)
-            return view->mapToScene(view->viewport()->rect()).boundingRect();
-
-        return QRectF();
-    }
+    QRectF GetVisibleSceneRect() const;
 
 };
 

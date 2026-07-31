@@ -2,4 +2,24 @@
 
 REGISTER_TOOL(ScaleTool, "scale")
 
-const bool ScaleTool::registered = true;
+ScaleTool::ScaleTool(QObject* parent) : Tool(parent) { }
+
+QString ScaleTool::GetId() const
+{
+    return QStringLiteral("scale");
+}
+
+QString ScaleTool::GetDisplayName() const
+{
+    return tr("Scale");
+}
+
+QKeySequence ScaleTool::GetShortcut() const
+{
+    return QKeySequence(Qt::Key_R);
+}
+
+QString ScaleTool::GetGizmoId() const
+{
+    return QStringLiteral("scale");
+}

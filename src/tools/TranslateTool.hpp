@@ -2,7 +2,6 @@
 #define TRANSLATETOOL_HPP
 
 #include "tools/Tool.hpp"
-#include "input/InputHandler.hpp"
 
 class TranslateTool : public Tool
 {
@@ -10,37 +9,15 @@ class TranslateTool : public Tool
 
 public:
 
-    explicit TranslateTool(QObject* parent = nullptr) : Tool(parent) { }
+    explicit TranslateTool(QObject* parent = nullptr);
 
-    QString GetId() const override
-    {
-        return QStringLiteral("translate");
-    }
+    QString GetId() const override;
 
-    QString GetDisplayName() const override
-    {
-        return tr("Move");
-    }
+    QString GetDisplayName() const override;
 
-    QKeySequence GetShortcut() const override
-    {
-        return QKeySequence(Qt::Key_W);
-    }
+    QKeySequence GetShortcut() const override;
 
-    QString GetGizmoId() const override
-    {
-        return QStringLiteral("translate");
-    }
-
-    InputHandler* CreateInputHandler() override
-    {
-        // Input handling is centralized in ToolManager
-        return nullptr;
-    }
-
-private:
-
-    static const bool registered;
+    QString GetGizmoId() const override;
 
 };
 

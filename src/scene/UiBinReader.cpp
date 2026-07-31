@@ -44,6 +44,7 @@ namespace
 
             QVariant value;
             quint32 assetRef = kNoAsset;
+            bool unknownTag = false;
 
             switch (tag)
             {
@@ -56,9 +57,13 @@ namespace
             case TAG_COLOR:  value = QColor::fromRgba(QRgb(r.U32())); break;
             case TAG_POINT:  { const double x = r.F64(); const double y = r.F64(); value = QPointF(x, y); break; }
             case TAG_ASSET_REF: assetRef = r.U32();           break;
-            default:
-                // Unknown tag: cannot know its width — abandon this component
-                // and resync via the payload length.
+            default: unknownTag = true;                       break;
+            }
+
+            // Unknown tag: cannot know its width — abandon this component
+            // and resync via the payload length (spec section 8).
+            if (unknownTag)
+            {
                 r.seek(payloadEnd);
                 break;
             }
@@ -131,9 +136,14 @@ UiElement* UiBinReader::Read(const QByteArray& bytes)
     const quint32 assetOff  = r.U32();
     const quint32 assetCount= r.U32();
     const quint32 treeOff   = r.U32();
-    r.U32();                                 // fileSize
+    const quint32 fileSize  = r.U32();
 
     if (version != kVersion || !r.ok())
+        return nullptr;
+
+    // The header's total-file-size field is a truncation sanity check (spec
+    // section 3): a mismatch means the file is truncated or corrupt.
+    if (qsizetype(fileSize) != bytes.size())
         return nullptr;
 
     Ctx ctx;

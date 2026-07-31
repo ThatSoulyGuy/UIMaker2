@@ -4,11 +4,9 @@
 #include <QString>
 #include <QColor>
 #include <QPixmap>
-#include <QPainter>
-#include <QPen>
+#include <QDateTime>
 
 #include "core/Component.hpp"
-#include "core/AssetContext.hpp"
 
 class ImageComponent : public Component
 {
@@ -21,148 +19,44 @@ class ImageComponent : public Component
 
 public:
 
-    explicit ImageComponent(QObject* parent = nullptr) : Component(parent), tint(Qt::white), pixelated(false) { }
+    explicit ImageComponent(QObject* parent = nullptr);
 
-    QString GetTypeName() const override
-    {
-        return QStringLiteral("Image");
-    }
+    QString GetTypeName() const override;
 
-    void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override
-    {
-        Q_UNUSED(item);
-        Q_UNUSED(parentRect);
+    void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override;
 
-        if (!imagePath.isEmpty())
-        {
-            QPixmap loaded(AssetContext::Resolve(imagePath));
+    bool Paint(QPainter* painter, const QRectF& rect, bool selected) override;
 
-            if (!loaded.isNull())
-            {
-                pixmap = loaded;
-                rect = QRectF(QPointF(0.0, 0.0), loaded.size());
-            }
-        }
-    }
+    QString GetImagePath() const noexcept;
 
-    bool Paint(QPainter* painter, const QRectF& rect, bool selected) override
-    {
-        if (pixmap.isNull())
-            return false;
+    void SetImagePath(const QString& v);
 
-        painter->save();
-        painter->setOpacity(1.0);
-        painter->setRenderHint(QPainter::SmoothPixmapTransform, !pixelated);
-        painter->drawPixmap(rect, pixmap, QRectF(QPointF(0.0, 0.0), QSizeF(pixmap.width(), pixmap.height())));
+    QString GetAssetDomain() const noexcept;
 
-        if (selected)
-        {
-            painter->setPen(QPen(QColor(0, 180, 255), 2, Qt::DashLine));
-            painter->setBrush(Qt::NoBrush);
-            painter->drawRect(rect);
-        }
+    void SetAssetDomain(const QString& v);
 
-        painter->restore();
+    QString GetAssetRegistryValue() const noexcept;
 
-        return true;
-    }
+    void SetAssetRegistryValue(const QString& v);
 
-    QString GetImagePath() const noexcept
-    {
-        return imagePath;
-    }
+    QColor GetTint() const noexcept;
 
-    void SetImagePath(const QString& v)
-    {
-        if (imagePath == v)
-            return;
+    void SetTint(const QColor& v);
 
-        imagePath = v;
+    bool IsPixelated() const noexcept;
 
-        NotifyChanged();
-    }
+    void SetPixelated(bool v);
 
-    QString GetAssetDomain() const noexcept
-    {
-        return assetDomain;
-    }
+    void ToJson(QJsonObject& out) const override;
 
-    void SetAssetDomain(const QString& v)
-    {
-        if (assetDomain == v)
-            return;
-
-        assetDomain = v;
-
-        NotifyChanged();
-    }
-
-    QString GetAssetRegistryValue() const noexcept
-    {
-        return assetRegistryValue;
-    }
-
-    void SetAssetRegistryValue(const QString& v)
-    {
-        if (assetRegistryValue == v)
-            return;
-
-        assetRegistryValue = v;
-
-        NotifyChanged();
-    }
-
-    QColor GetTint() const noexcept
-    {
-        return tint;
-    }
-
-    void SetTint(const QColor& v)
-    {
-        if (tint == v)
-            return;
-
-        tint = v;
-
-        NotifyChanged();
-    }
-
-    bool IsPixelated() const noexcept
-    {
-        return pixelated;
-    }
-
-    void SetPixelated(bool v)
-    {
-        if (pixelated == v)
-            return;
-
-        pixelated = v;
-
-        NotifyChanged();
-    }
-
-    void ToJson(QJsonObject& out) const override
-    {
-        out["kind"] = "Image";
-        out["imagePath"] = imagePath;
-        out["tint"] = tint.name(QColor::HexArgb);
-        out["assetDomain"] = assetDomain;
-        out["assetRegistryValue"] = assetRegistryValue;
-        out["pixelated"] = pixelated;
-    }
-
-    void FromJson(const QJsonObject& in) override
-    {
-        SetImagePath(in["imagePath"].toString());
-        SetTint(QColor(in["tint"].toString("#FFFFFFFF")));
-        SetAssetDomain(in["assetDomain"].toString());
-        SetAssetRegistryValue(in["assetRegistryValue"].toString());
-        SetPixelated(in["pixelated"].toBool(false));
-    }
+    void FromJson(const QJsonObject& in) override;
 
 
 private:
+
+    void ReloadPixmap();
+
+    const QPixmap& EnsureTintedPixmap();
 
     QString imagePath;
     QColor tint;
@@ -170,6 +64,10 @@ private:
     QString assetRegistryValue;
     bool pixelated;
     QPixmap pixmap;
+    QString resolvedPath;
+    QDateTime resolvedMtime;
+    QPixmap tintedPixmap;
+    QColor tintedPixmapColor;
 
 };
 

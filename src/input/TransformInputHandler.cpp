@@ -1,4 +1,5 @@
 #include "input/TransformInputHandler.hpp"
+#include "gizmos/GizmoManager.hpp"
 #include "scene/SceneDocument.hpp"
 #include "scene/SceneElementItem.hpp"
 #include "core/UiElement.hpp"
@@ -89,22 +90,25 @@ InputResult TransformInputHandler::HandleMove(const MouseMoveEvent& event, Edito
     if (!m_transforming || !m_gizmoManager)
     {
         // Just update cursor on hover
-        QList<SceneElementItem*> selectedItems = GetTopLevelSelectedItems(ctx);
-
-        if (!selectedItems.isEmpty() && ctx.view)
+        if (m_gizmoManager)
         {
-            const QRectF sceneBounds = selectedItems.size() > 1
-                ? ComputeUnionSceneBounds(selectedItems)
-                : selectedItems.first()->sceneBoundingRect();
+            QList<SceneElementItem*> selectedItems = GetTopLevelSelectedItems(ctx);
 
-            GizmoHitResult hit = m_gizmoManager->HitTest(event.viewPos, sceneBounds, ctx.view);
-
-            if (hit.IsHit())
+            if (!selectedItems.isEmpty() && ctx.view)
             {
-                InputResult result;
-                result.cursor = hit.cursor;
+                const QRectF sceneBounds = selectedItems.size() > 1
+                    ? ComputeUnionSceneBounds(selectedItems)
+                    : selectedItems.first()->sceneBoundingRect();
 
-                return result;
+                GizmoHitResult hit = m_gizmoManager->HitTest(event.viewPos, sceneBounds, ctx.view);
+
+                if (hit.IsHit())
+                {
+                    InputResult result;
+                    result.cursor = hit.cursor;
+
+                    return result;
+                }
             }
         }
 

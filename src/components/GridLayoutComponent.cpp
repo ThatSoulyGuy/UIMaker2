@@ -2,7 +2,16 @@
 #include "scene/SceneElementItem.hpp"
 #include "core/UiElement.hpp"
 
+#include <QJsonObject>
+
 REGISTER_COMPONENT(GridLayoutComponent, "GridLayout")
+
+GridLayoutComponent::GridLayoutComponent(QObject* parent)
+    : Component(parent), m_columns(2), m_spacingH(8.0), m_spacingV(8.0), m_padding(8.0) { }
+
+QString GridLayoutComponent::GetTypeName() const { return QStringLiteral("GridLayout"); }
+int GridLayoutComponent::UpdateOrder() const { return 100; }
+bool GridLayoutComponent::IsLayout() const { return true; }
 
 void GridLayoutComponent::Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect)
 {
@@ -10,7 +19,13 @@ void GridLayoutComponent::Update(SceneElementItem& item, QRectF& rect, const QRe
 
     auto* element = item.GetElement();
 
-    QObject::connect(element, &UiElement::StructureChanged, this, &GridLayoutComponent::OnChildChanged, Qt::UniqueConnection);
+    // Drop connections to ex-children so removed/reparented items stop
+    // triggering relayout of this container, then re-wire the current set.
+    for (const auto& conn : m_childConnections)
+        QObject::disconnect(conn);
+    m_childConnections.clear();
+
+    m_childConnections.append(QObject::connect(element, &UiElement::StructureChanged, this, &GridLayoutComponent::OnChildChanged));
 
     // Collect children
     std::vector<SceneElementItem*> children;
@@ -22,7 +37,7 @@ void GridLayoutComponent::Update(SceneElementItem& item, QRectF& rect, const QRe
 
         auto* childElement = childItem->GetElement();
         for (auto* comp : childElement->GetComponents())
-            QObject::connect(comp, &Component::ComponentChanged, this, &GridLayoutComponent::OnChildChanged, Qt::UniqueConnection);
+            m_childConnections.append(QObject::connect(comp, &Component::ComponentChanged, this, &GridLayoutComponent::OnChildChanged));
 
         children.push_back(childItem);
     }
@@ -101,4 +116,35 @@ bool GridLayoutComponent::Paint(QPainter* painter, const QRectF& rect, bool sele
 
     painter->restore();
     return true;
+}
+
+int GridLayoutComponent::GetColumns() const noexcept { return m_columns; }
+void GridLayoutComponent::SetColumns(int v) { v = std::max(1, v); if (m_columns == v) return; m_columns = v; NotifyChanged(); }
+
+double GridLayoutComponent::GetSpacingH() const noexcept { return m_spacingH; }
+void GridLayoutComponent::SetSpacingH(double v) { if (m_spacingH == v) return; m_spacingH = v; NotifyChanged(); }
+
+double GridLayoutComponent::GetSpacingV() const noexcept { return m_spacingV; }
+void GridLayoutComponent::SetSpacingV(double v) { if (m_spacingV == v) return; m_spacingV = v; NotifyChanged(); }
+
+double GridLayoutComponent::GetPadding() const noexcept { return m_padding; }
+void GridLayoutComponent::SetPadding(double v) { if (m_padding == v) return; m_padding = v; NotifyChanged(); }
+
+void GridLayoutComponent::OnChildChanged() { NotifyChanged(); }
+
+void GridLayoutComponent::ToJson(QJsonObject& out) const
+{
+    out["kind"] = "GridLayout";
+    out["columns"] = m_columns;
+    out["spacingH"] = m_spacingH;
+    out["spacingV"] = m_spacingV;
+    out["padding"] = m_padding;
+}
+
+void GridLayoutComponent::FromJson(const QJsonObject& in)
+{
+    SetColumns(in["columns"].toInt(2));
+    SetSpacingH(in["spacingH"].toDouble(8.0));
+    SetSpacingV(in["spacingV"].toDouble(8.0));
+    SetPadding(in["padding"].toDouble(8.0));
 }

@@ -13,10 +13,6 @@
   <property name="windowTitle">
    <string>UIMaker2</string>
   </property>
-  <property name="windowIcon">
-   <iconset>
-    <normaloff>C:/Users/bkmcm/Documents/Models/UIMakerIcon.png</normaloff>C:/Users/bkmcm/Documents/Models/UIMakerIcon.png</iconset>
-  </property>
   <widget class="QWidget" name="Grid">
    <layout class="QGridLayout" name="gridLayout">
     <item row="0" column="0">
@@ -121,11 +117,6 @@
     <string>Load...</string>
    </property>
   </action>
-  <action name="actionProperties">
-   <property name="text">
-    <string>Properties</string>
-   </property>
-  </action>
   <action name="ActionMove">
    <property name="text">
     <string>Move</string>
@@ -139,16 +130,6 @@
   <action name="ActionRotate">
    <property name="text">
     <string>Rotate</string>
-   </property>
-  </action>
-  <action name="ActionUndo">
-   <property name="text">
-    <string>Undo</string>
-   </property>
-  </action>
-  <action name="ActionRedo">
-   <property name="text">
-    <string>Redo</string>
    </property>
   </action>
   <action name="ActionAddImage">

@@ -8,79 +8,40 @@
 #include <QHash>
 #include <functional>
 
-class InputHandler;
-
 class Tool : public QObject
 {
     Q_OBJECT
 
 public:
 
-    explicit Tool(QObject* parent = nullptr) : QObject(parent) { }
+    explicit Tool(QObject* parent = nullptr);
 
     virtual ~Tool() = default;
 
     virtual QString GetId() const = 0;
     virtual QString GetDisplayName() const = 0;
 
-    virtual QIcon GetIcon() const
-    {
-        return QIcon();
-    }
+    virtual QIcon GetIcon() const;
 
-    virtual QKeySequence GetShortcut() const
-    {
-        return QKeySequence();
-    }
+    virtual QKeySequence GetShortcut() const;
 
-    virtual void Activate()
-    {
-        m_active = true;
+    virtual void Activate();
 
-        emit Activated();
-    }
+    virtual void Deactivate();
 
-    virtual void Deactivate()
-    {
-        m_active = false;
-
-        emit Deactivated();
-    }
-
-    bool IsActive() const noexcept
-    {
-        return m_active;
-    }
+    bool IsActive() const noexcept;
 
     virtual QString GetGizmoId() const = 0;
 
-    virtual InputHandler* CreateInputHandler() = 0;
-
     using ToolFactory = std::function<Tool*(QObject*)>;
 
-    static QHash<QString, ToolFactory>& Registry()
-    {
-        static QHash<QString, ToolFactory> registry;
+    static QHash<QString, ToolFactory>& Registry();
 
-        return registry;
-    }
+    static void Register(const QString& id, ToolFactory factory);
 
-    static void Register(const QString& id, ToolFactory factory)
-    {
-        Registry().insert(id, factory);
-    }
+    static Tool* Create(const QString& id, QObject* parent);
 
-    static Tool* Create(const QString& id, QObject* parent)
-    {
-        auto it = Registry().find(id);
-
-        return it != Registry().end() ? it.value()(parent) : nullptr;
-    }
-
-    static QStringList GetRegisteredIds()
-    {
-        return Registry().keys();
-    }
+    static QStringList GetRegisteredIds();
 
 signals:
 

@@ -12,6 +12,45 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+// Forward/inverse pair for anchor-based positioning. AnchorAdjustedItemPos maps a
+// component-space position to an item pos inside parentRect; InverseAnchorComponentPos
+// maps an item pos back to the component-space position. They are exact inverses of
+// each other and must change together.
+static QPointF AnchorAdjustedItemPos(const QPointF& pos, AnchorFlags anchors, const QRectF& parentRect, double w, double h)
+{
+    double x = pos.x();
+    double y = pos.y();
+
+    if (anchors.testFlag(Anchor::RIGHT))
+        x = parentRect.width() - w - pos.x();
+    else if (anchors.testFlag(Anchor::CENTER_X))
+        x = (parentRect.width() - w) * 0.5 + pos.x();
+
+    if (anchors.testFlag(Anchor::BOTTOM))
+        y = parentRect.height() - h - pos.y();
+    else if (anchors.testFlag(Anchor::CENTER_Y))
+        y = (parentRect.height() - h) * 0.5 + pos.y();
+
+    return parentRect.topLeft() + QPointF(x, y);
+}
+
+static QPointF InverseAnchorComponentPos(const QPointF& itemPos, AnchorFlags anchors, const QRectF& parentRect, double w, double h)
+{
+    QPointF p = itemPos - parentRect.topLeft();
+
+    if (anchors.testFlag(Anchor::RIGHT))
+        p.setX(parentRect.width() - w - p.x());
+    else if (anchors.testFlag(Anchor::CENTER_X))
+        p.setX(p.x() - (parentRect.width() - w) * 0.5);
+
+    if (anchors.testFlag(Anchor::BOTTOM))
+        p.setY(parentRect.height() - h - p.y());
+    else if (anchors.testFlag(Anchor::CENTER_Y))
+        p.setY(p.y() - (parentRect.height() - h) * 0.5);
+
+    return p;
+}
+
 SceneElementItem::SceneElementItem(UiElement* element) : QGraphicsObject(nullptr), element(element), localRect(-50.0, -25.0, 100.0, 50.0)
 {
     const bool isSlot = element && element->IsSlot();
@@ -92,27 +131,7 @@ void SceneElementItem::RefreshFromComponents()
         }
 
         if (!parentHasLayout)
-        {
-            const QPointF pos = xform->GetPosition();
-            const auto anchors = xform->GetAnchors();
-            const double w = newRect.width();
-            const double h = newRect.height();
-
-            double x = pos.x();
-            double y = pos.y();
-
-            if (anchors.testFlag(Anchor::RIGHT))
-                x = parentRect.width() - w - pos.x();
-            else if (anchors.testFlag(Anchor::CENTER_X))
-                x = (parentRect.width() - w) * 0.5 + pos.x();
-
-            if (anchors.testFlag(Anchor::BOTTOM))
-                y = parentRect.height() - h - pos.y();
-            else if (anchors.testFlag(Anchor::CENTER_Y))
-                y = (parentRect.height() - h) * 0.5 + pos.y();
-
-            setPosFromComponent(parentRect.topLeft() + QPointF(x, y));
-        }
+            setPosFromComponent(AnchorAdjustedItemPos(xform->GetPosition(), xform->GetAnchors(), parentRect, newRect.width(), newRect.height()));
 
         setTransformOriginPoint(newRect.center());
         setRotationFromComponent(xform->GetRotationDegrees());
@@ -205,20 +224,7 @@ QVariant SceneElementItem::itemChange(GraphicsItemChange change, const QVariant&
                 else if (scene())
                     parentRect = scene()->sceneRect();
 
-                auto anchors = xform->GetAnchors();
-                QPointF p = pos() - parentRect.topLeft();
-
-                if (anchors.testFlag(Anchor::RIGHT))
-                    p.setX(parentRect.width() - localRect.width() - p.x());
-                else if (anchors.testFlag(Anchor::CENTER_X))
-                    p.setX(p.x() - (parentRect.width() - localRect.width()) * 0.5);
-
-                if (anchors.testFlag(Anchor::BOTTOM))
-                    p.setY(parentRect.height() - localRect.height() - p.y());
-                else if (anchors.testFlag(Anchor::CENTER_Y))
-                    p.setY(p.y() - (parentRect.height() - localRect.height()) * 0.5);
-
-                xform->SetPosition(p);
+                xform->SetPosition(InverseAnchorComponentPos(pos(), xform->GetAnchors(), parentRect, localRect.width(), localRect.height()));
             }
         }
     }
@@ -264,4 +270,14 @@ void SceneElementItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*,
     }
 
     painter->restore();
+}
+
+QRectF SceneElementItem::boundingRect() const
+{
+    return localRect;
+}
+
+UiElement* SceneElementItem::GetElement() const noexcept
+{
+    return element;
 }

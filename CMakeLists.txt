@@ -24,8 +24,11 @@ qt_add_executable(UIMaker2
     # Core
     src/core/Anchor.hpp
     src/core/Component.hpp
+    src/core/Component.cpp
     src/core/UiElement.hpp
+    src/core/UiElement.cpp
     src/core/AssetContext.hpp
+    src/core/AssetContext.cpp
 
     # Components
     src/components/TransformComponent.hpp
@@ -81,6 +84,7 @@ qt_add_executable(UIMaker2
     src/scene/SceneExporter.hpp
     src/scene/SceneExporter.cpp
     src/scene/UiBinCommon.hpp
+    src/scene/UiBinCommon.cpp
     src/scene/UiBinWriter.hpp
     src/scene/UiBinWriter.cpp
     src/scene/UiBinReader.hpp
@@ -92,10 +96,13 @@ qt_add_executable(UIMaker2
     src/ui/PropertyEditorPanel.hpp
     src/ui/PropertyEditorPanel.cpp
     src/ui/ViewportWidget.hpp
+    src/ui/ViewportWidget.cpp
 
     # Tools
     src/tools/Tool.hpp
+    src/tools/Tool.cpp
     src/tools/ToolManager.hpp
+    src/tools/ToolManager.cpp
     src/tools/TranslateTool.hpp
     src/tools/TranslateTool.cpp
     src/tools/RotateTool.hpp
@@ -105,7 +112,9 @@ qt_add_executable(UIMaker2
 
     # Gizmos
     src/gizmos/Gizmo.hpp
+    src/gizmos/Gizmo.cpp
     src/gizmos/GizmoManager.hpp
+    src/gizmos/GizmoManager.cpp
     src/gizmos/TranslateGizmo.hpp
     src/gizmos/TranslateGizmo.cpp
     src/gizmos/RotateGizmo.hpp
@@ -118,15 +127,19 @@ qt_add_executable(UIMaker2
     src/input/EditorContext.hpp
     src/input/EditorContext.cpp
     src/input/InputHandler.hpp
+    src/input/InputHandler.cpp
     src/input/PanZoomHandler.hpp
+    src/input/PanZoomHandler.cpp
     src/input/TransformInputHandler.hpp
     src/input/TransformInputHandler.cpp
 
     # Render
     src/render/RenderPass.hpp
+    src/render/RenderPass.cpp
     src/render/RenderPipeline.hpp
+    src/render/RenderPipeline.cpp
     src/render/GizmoRenderPass.hpp
-    src/render/SelectionRenderPass.hpp
+    src/render/GizmoRenderPass.cpp
 )
 
 target_include_directories(UIMaker2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

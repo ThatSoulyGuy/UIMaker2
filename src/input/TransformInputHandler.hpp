@@ -5,8 +5,8 @@
 #include <QList>
 
 #include "input/InputHandler.hpp"
-#include "gizmos/GizmoManager.hpp"
 
+class GizmoManager;
 class SceneDocument;
 class SceneElementItem;
 class TransformComponent;

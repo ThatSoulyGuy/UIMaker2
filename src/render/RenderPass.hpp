@@ -4,8 +4,6 @@
 #include <QObject>
 #include <QString>
 #include <QPainter>
-#include <QHash>
-#include <functional>
 
 #include "input/EditorContext.hpp"
 
@@ -26,7 +24,7 @@ class RenderPass : public QObject
 
 public:
 
-    explicit RenderPass(QObject* parent = nullptr) : QObject(parent) { }
+    explicit RenderPass(QObject* parent = nullptr);
 
     virtual ~RenderPass() = default;
 
@@ -35,52 +33,14 @@ public:
 
     virtual void Render(QPainter& painter, const EditorContext& ctx) = 0;
 
-    bool IsEnabled() const noexcept
-    {
-        return m_enabled;
-    }
+    bool IsEnabled() const noexcept;
 
-    void SetEnabled(bool enabled)
-    {
-        m_enabled = enabled;
-    }
-
-    using RenderPassFactory = std::function<RenderPass*(QObject*)>;
-
-    static QHash<QString, RenderPassFactory>& Registry()
-    {
-        static QHash<QString, RenderPassFactory> registry;
-
-        return registry;
-    }
-
-    static void Register(const QString& id, RenderPassFactory factory)
-    {
-        Registry().insert(id, factory);
-    }
-
-    static RenderPass* Create(const QString& id, QObject* parent)
-    {
-        auto it = Registry().find(id);
-
-        return it != Registry().end() ? it.value()(parent) : nullptr;
-    }
-
-    static QStringList GetRegisteredIds()
-    {
-        return Registry().keys();
-    }
+    void SetEnabled(bool enabled);
 
 protected:
 
     bool m_enabled = true;
 
 };
-
-#define REGISTER_RENDER_PASS(ClassName, PassId) \
-    static const bool ClassName##_pass_registered = [](){ \
-        RenderPass::Register(PassId, [](QObject* p){ return new ClassName(p); }); \
-        return true; \
-    }();
 
 #endif

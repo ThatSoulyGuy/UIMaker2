@@ -5,7 +5,7 @@
 
 class SceneDocument;
 
-// Bakes a SceneDocument into the custom binary .uibin v2 container.
+// Bakes a SceneDocument into the custom binary .uibin v4 container.
 //
 // imagePath / fontPath / iconPath are NOT encoded. Each is resolved against
 // the document's project root, the file's raw bytes are embedded once in the

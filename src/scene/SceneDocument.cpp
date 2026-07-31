@@ -1,7 +1,51 @@
 #include "scene/SceneDocument.hpp"
+
 #include <QBrush>
+#include <QColor>
+#include <QGraphicsRectItem>
+#include <QGraphicsScene>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
+#include <QPainter>
+#include <QPen>
+#include <QPixmap>
+#include <QPointF>
 #include <QSet>
 #include <QSignalBlocker>
+#include <QStringList>
+#include <QUuid>
+#include <functional>
+
+#include "core/Anchor.hpp"
+#include "core/AssetContext.hpp"
+#include "core/Component.hpp"
+#include "core/UiElement.hpp"
+#include "scene/SceneElementItem.hpp"
+
+#include "components/TransformComponent.hpp"
+#include "components/ImageComponent.hpp"
+#include "components/TextComponent.hpp"
+#include "components/ButtonComponent.hpp"
+#include "components/StackLayoutComponent.hpp"
+#include "components/GridLayoutComponent.hpp"
+#include "components/ScrollBoxComponent.hpp"
+#include "components/PanelComponent.hpp"
+#include "components/ProgressBarComponent.hpp"
+#include "components/ToggleComponent.hpp"
+#include "components/DropdownComponent.hpp"
+#include "components/TextInputComponent.hpp"
+#include "components/IconComponent.hpp"
+#include "components/SpriteComponent.hpp"
+#include "components/TooltipComponent.hpp"
+#include "components/ModalComponent.hpp"
+#include "components/TabContainerComponent.hpp"
+#include "components/RadialMenuComponent.hpp"
+#include "components/MinimapComponent.hpp"
+#include "components/DragSlotComponent.hpp"
+#include "components/ListRepeaterComponent.hpp"
+#include "components/SlotComponent.hpp"
 
 SceneDocument::SceneDocument(QObject* parent) : QObject(parent), root(new UiElement("Root")), scene(new QGraphicsScene(this)), rootRect(nullptr)
 {
@@ -43,11 +87,28 @@ SceneDocument::SceneDocument(QObject* parent) : QObject(parent), root(new UiElem
         rootRect->setZValue(-1);
     }
 
-    QObject::connect(scene, &QGraphicsScene::sceneRectChanged, this, [this](const QRectF& r)
+    WireRootConnections();
+}
+
+SceneDocument::~SceneDocument()
+{
+    delete root;
+}
+
+// Root-scoped connections are re-established on every load (the root is
+// replaced), so disconnect the previous ones first to avoid stacking.
+void SceneDocument::WireRootConnections()
+{
+    QObject::disconnect(m_sceneRectConn);
+    QObject::disconnect(m_rootStructureConn);
+
+    m_sceneRectConn = QObject::connect(scene, &QGraphicsScene::sceneRectChanged, this, [this](const QRectF& r)
     {
         if (rootRect)
             rootRect->setRect(r);
     });
+
+    m_rootStructureConn = QObject::connect(root, &UiElement::StructureChanged, this, &SceneDocument::OnStructureChanged);
 }
 
 SceneElementItem* SceneDocument::CreateItemFor(UiElement* e)
@@ -464,21 +525,16 @@ bool SceneDocument::LoadJson(const QByteArray& data)
     for (const QJsonValue& v : rootObj["children"].toArray())
         CreateElementFromJson(v.toObject(), root, /*preserveIds=*/true);
 
-    QObject::connect(scene, &QGraphicsScene::sceneRectChanged, this, [this](const QRectF& r){ if (rootRect) rootRect->setRect(r); });
-
-    QObject::connect(root, &UiElement::StructureChanged, this, &SceneDocument::OnStructureChanged);
+    WireRootConnections();
     OnStructureChanged();
 
     return true;
 }
 
-void SceneDocument::DeleteElement(UiElement* e)
+// Destroys an element, its subtree, and their SceneElementItems without any
+// guards or notifications. Callers emit the structure-change signals.
+void SceneDocument::RemoveElementInternal(UiElement* e)
 {
-    if (!e || e == root || e->IsSlot())
-        return;
-
-    SetSelected(nullptr);
-
     std::function<void(UiElement*)> removeRec = [&](UiElement* n)
     {
         const QObjectList kids = n->children();
@@ -498,9 +554,19 @@ void SceneDocument::DeleteElement(UiElement* e)
 
     removeRec(e);
 
-    UiElement* parent = qobject_cast<UiElement*>(e->parent());
     e->setParent(nullptr);
     delete e;
+}
+
+void SceneDocument::DeleteElement(UiElement* e)
+{
+    if (!e || e == root || e->IsSlot())
+        return;
+
+    SetSelected(nullptr);
+
+    UiElement* parent = qobject_cast<UiElement*>(e->parent());
+    RemoveElementInternal(e);
 
     if (parent)
         emit parent->StructureChanged();
@@ -637,21 +703,32 @@ void SceneDocument::EnsureSlots(UiElement* master, const QString& masterKind, in
     if (!master)
         return;
 
-    int current = 0;
+    // Existing slots by index. Growth is index-based so a missing middle index
+    // is recreated even when the total count happens to match, and a surviving
+    // surplus slot is reused (same element, same id) if the count grows back.
+    QSet<int> present;
 
     for (QObject* c : master->children())
     {
         if (auto* ce = qobject_cast<UiElement*>(c))
         {
-            if (ce->IsSlot())
-                ++current;
+            if (!ce->IsSlot())
+                continue;
+
+            auto* s = ce->GetComponent<SlotComponent>();
+
+            if (s && s->GetMasterKind() == masterKind)
+                present.insert(s->GetSlotIndex());
         }
     }
 
     bool added = false;
 
-    for (int i = current; i < desiredCount; ++i)
+    for (int i = 0; i < desiredCount; ++i)
     {
+        if (present.contains(i))
+            continue;
+
         UiElement* slave = master->AddChild(nameFormat.arg(i + 1));
 
         auto* t = slave->AddComponent<TransformComponent>();
@@ -666,10 +743,54 @@ void SceneDocument::EnsureSlots(UiElement* master, const QString& masterKind, in
         added = true;
     }
 
-    if (added)
+    // Shrink: surplus slots are unreachable through user deletion (DeleteElement's
+    // IsSlot() guard), so prune them here - but ONLY when empty. A surplus slot
+    // still holding user content is kept (and reused if the count grows back), so
+    // reconciliation can never destroy content: not during per-keystroke tabNames
+    // edits, not on undo of a count change, and not while loading legacy files
+    // that serialised orphan slots with content. Collect first, then delete, so
+    // nothing iterates the child list while it mutates.
+    QList<UiElement*> doomed;
+
+    for (QObject* c : master->children())
+    {
+        auto* ce = qobject_cast<UiElement*>(c);
+
+        if (!ce || !ce->IsSlot())
+            continue;
+
+        auto* s = ce->GetComponent<SlotComponent>();
+
+        if (!s || s->GetMasterKind() != masterKind || s->GetSlotIndex() < desiredCount)
+            continue;
+
+        bool hasContent = false;
+
+        for (QObject* cc : ce->children())
+        {
+            if (qobject_cast<UiElement*>(cc))
+            {
+                hasContent = true;
+                break;
+            }
+        }
+
+        if (!hasContent)
+            doomed.append(ce);
+    }
+
+    for (UiElement* ce : doomed)
+        RemoveElementInternal(ce);
+
+    if (added || !doomed.isEmpty())
     {
         if (auto* masterItem = items.value(master, nullptr))
             masterItem->RefreshFromComponents();
+
+        // Root's StructureChanged is what the hierarchy panel listens to; emit
+        // for growth as well as shrink so new slots appear immediately.
+        emit master->StructureChanged();
+        emit root->StructureChanged();
     }
 }
 
@@ -694,4 +815,30 @@ void SceneDocument::WireSlotReconciliation(UiElement* master)
             EnsureSlots(master, QStringLiteral("RadialMenu"), rm->GetSliceCount(), QStringLiteral("Slot %1"));
         });
     }
+}
+
+UiElement* SceneDocument::GetRoot() const noexcept
+{
+    return root;
+}
+
+QGraphicsScene* SceneDocument::GetScene() const noexcept
+{
+    return scene;
+}
+
+QString SceneDocument::GetBaseDir() const noexcept
+{
+    return m_baseDir;
+}
+
+void SceneDocument::SetBaseDir(const QString& dir)
+{
+    m_baseDir = dir;
+    AssetContext::SetBaseDir(dir);
+}
+
+SceneElementItem* SceneDocument::GetItem(UiElement* e) const
+{
+    return items.value(e, nullptr);
 }

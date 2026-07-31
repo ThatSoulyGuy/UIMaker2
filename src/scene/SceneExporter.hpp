@@ -17,7 +17,8 @@ public:
     // every referenced asset into folderPath, mirroring its relative location.
     static bool ExportToFolder(const SceneDocument* doc, const QString& folderPath);
 
-    // Bakes the scene into the custom binary .uibin v2 container.
+    // Bakes the scene into the custom binary .uibin v4 container and
+    // round-trip validates the written file with UiBinReader.
     static bool BakeToUiBin(const SceneDocument* doc, const QString& filePath);
 
 private:

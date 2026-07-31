@@ -17,72 +17,36 @@ class Component : public QObject
 
 public:
 
-    explicit Component(QObject* parent = nullptr) : QObject(parent) { }
+    explicit Component(QObject* parent = nullptr);
 
     virtual ~Component() = default;
     virtual QString GetTypeName() const = 0;
 
-    virtual int UpdateOrder() const
-    {
-        return 0;
-    }
+    virtual int UpdateOrder() const;
 
-    virtual bool IsLayout() const
-    {
-        return false;
-    }
+    virtual bool IsLayout() const;
 
-    virtual void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect)
-    {
-        Q_UNUSED(item);
-        Q_UNUSED(rect);
-        Q_UNUSED(parentRect);
-    }
+    virtual void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect);
 
-    virtual bool Paint(QPainter* painter, const QRectF& rect, bool selected)
-    {
-        Q_UNUSED(painter);
-        Q_UNUSED(rect);
-        Q_UNUSED(selected);
-
-        return false;
-    }
+    virtual bool Paint(QPainter* painter, const QRectF& rect, bool selected);
 
     virtual void ToJson(QJsonObject& out) const = 0;
     virtual void FromJson(const QJsonObject& in) = 0;
 
     using ComponentFactory = std::function<Component*(QObject*)>;
-    static QHash<QString, ComponentFactory>& Registry()
-    {
-        static QHash<QString, ComponentFactory> registry;
+    static QHash<QString, ComponentFactory>& Registry();
 
-        return registry;
-    }
+    static void Register(const QString& name, ComponentFactory factory);
 
-    static void Register(const QString& name, ComponentFactory factory)
-    {
-        Registry().insert(name, factory);
-    }
-
-    static Component* Create(const QString& name, QObject* parent)
-    {
-        auto it = Registry().find(name);
-        return it != Registry().end() ? it.value()(parent) : nullptr;
-    }
+    static Component* Create(const QString& name, QObject* parent);
 
 public slots:
 
-    void EmitComponentChanged()
-    {
-        emit ComponentChanged();
-    }
+    void EmitComponentChanged();
 
 protected:
 
-    void NotifyChanged()
-    {
-        QMetaObject::invokeMethod(this, "EmitComponentChanged", Qt::QueuedConnection);
-    }
+    void NotifyChanged();
 
 signals:
 

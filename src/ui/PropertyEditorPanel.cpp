@@ -1,5 +1,8 @@
 #include "ui/PropertyEditorPanel.hpp"
 #include "core/AssetContext.hpp"
+#include "core/UiElement.hpp"
+#include "core/Component.hpp"
+#include "core/Anchor.hpp"
 #include <QMetaProperty>
 #include <QMessageBox>
 #include <QApplication>
@@ -7,7 +10,18 @@
 #include <QGroupBox>
 #include <QCheckBox>
 #include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QFormLayout>
+#include <QScrollArea>
 #include <QComboBox>
+#include <QLineEdit>
+#include <QDoubleSpinBox>
+#include <QSpinBox>
+#include <QAbstractSpinBox>
+#include <QPushButton>
+#include <QColor>
+#include <QColorDialog>
+#include <QFileDialog>
 #include <QPointer>
 #include <QTimer>
 #include <QFile>
@@ -131,22 +145,50 @@ void PropertyEditorPanel::SetTargets(const QList<UiElement*>& elements)
     Rebuild();
 }
 
+void PropertyEditorPanel::RefreshTargets()
+{
+    pendingRebuild = false;
+    Rebuild();
+}
+
 void PropertyEditorPanel::ApplyPropertyChange(QObject* primary, const QByteArray& propName, const QVariant& value)
 {
     if (!primary)
         return;
 
-    primary->setProperty(propName.constData(), value);
+    // Record each object's prior value alongside the write so MainWindow can
+    // build an undo command out of real changes only.
+    QList<PropertyEditRecord> records;
 
-    // Broadcast to every other selected element's same-kind component, so a property
-    // edit in the panel updates the whole multiselection in lock-step.
+    auto recordAndSet = [&](QObject* obj, const QUuid& elementId, const QString& kind)
+    {
+        const QVariant before = obj->property(propName.constData());
+        obj->setProperty(propName.constData(), value);
+
+        if (!elementId.isNull() && before != value)
+            records.append({ elementId, kind, propName, before, value });
+    };
+
     auto* primaryComp = qobject_cast<Component*>(primary);
+
     if (!primaryComp)
+    {
+        auto* el = qobject_cast<UiElement*>(primary);
+        recordAndSet(primary, el ? el->GetId() : QUuid(), QString());
+
+        if (!records.isEmpty())
+            emit PropertyChangeApplied(records);
+
         return;
+    }
 
     auto* primaryOwner = qobject_cast<UiElement*>(primaryComp->parent());
     const QString kind = primaryComp->GetTypeName();
 
+    recordAndSet(primary, primaryOwner ? primaryOwner->GetId() : QUuid(), kind);
+
+    // Broadcast to every other selected element's same-kind component, so a property
+    // edit in the panel updates the whole multiselection in lock-step.
     for (UiElement* el : targets)
     {
         if (!el || el == primaryOwner)
@@ -159,11 +201,14 @@ void PropertyEditorPanel::ApplyPropertyChange(QObject* primary, const QByteArray
 
             if (otherComp->GetTypeName() == kind)
             {
-                otherComp->setProperty(propName.constData(), value);
+                recordAndSet(otherComp, el->GetId(), kind);
                 break;
             }
         }
     }
+
+    if (!records.isEmpty())
+        emit PropertyChangeApplied(records);
 }
 
 void PropertyEditorPanel::OnComponentChanged()

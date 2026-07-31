@@ -1,7 +1,9 @@
 #include "scene/SceneExporter.hpp"
 #include "scene/SceneDocument.hpp"
 #include "scene/UiBinWriter.hpp"
+#include "scene/UiBinReader.hpp"
 
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -182,9 +184,36 @@ bool SceneExporter::ExportToFolder(const SceneDocument* doc, const QString& fold
 
 // ---------------------------------------------------------------------------
 // Bake to .uibin: fully custom binary container (see uibin_format_spec.txt).
+// The written file is immediately re-read with UiBinReader; a bake that fails
+// round-trip validation reports failure.
 // ---------------------------------------------------------------------------
 
 bool SceneExporter::BakeToUiBin(const SceneDocument* doc, const QString& filePath)
 {
-    return UiBinWriter::Write(doc, filePath);
+    // Write to a sibling temp file and swap it in only after validation, so a
+    // failed bake can never clobber an existing good .uibin at the target path.
+    const QString tempPath = filePath + QStringLiteral(".tmp");
+
+    if (!UiBinWriter::Write(doc, tempPath))
+    {
+        QFile::remove(tempPath);
+        return false;
+    }
+
+    QString error;
+    if (!UiBinReader::Validate(tempPath, &error))
+    {
+        qWarning("SceneExporter::BakeToUiBin: round-trip validation failed for '%s': %s",
+                 qPrintable(filePath), qPrintable(error));
+        QFile::remove(tempPath);
+        return false;
+    }
+
+    if (QFile::exists(filePath) && !QFile::remove(filePath))
+    {
+        QFile::remove(tempPath);
+        return false;
+    }
+
+    return QFile::rename(tempPath, filePath);
 }

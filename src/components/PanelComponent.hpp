@@ -2,8 +2,6 @@
 #define COMPONENTS_PANELCOMPONENT_HPP
 
 #include <QColor>
-#include <QPainter>
-#include <QPen>
 
 #include "core/Component.hpp"
 
@@ -18,75 +16,27 @@ class PanelComponent : public Component
 
 public:
 
-    explicit PanelComponent(QObject* parent = nullptr)
-        : Component(parent)
-        , m_backgroundColor(QColor(50, 50, 55, 200))
-        , m_borderColor(QColor(100, 100, 110))
-        , m_borderWidth(1.0)
-        , m_cornerRadius(6.0) { }
+    explicit PanelComponent(QObject* parent = nullptr);
 
-    QString GetTypeName() const override { return QStringLiteral("Panel"); }
+    QString GetTypeName() const override;
 
-    bool Paint(QPainter* painter, const QRectF& rect, bool selected) override
-    {
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing, true);
+    bool Paint(QPainter* painter, const QRectF& rect, bool selected) override;
 
-        if (m_borderWidth > 0.0)
-        {
-            QPen pen(m_borderColor, m_borderWidth);
-            pen.setCosmetic(true);
-            painter->setPen(pen);
-        }
-        else
-        {
-            painter->setPen(Qt::NoPen);
-        }
+    QColor GetBackgroundColor() const noexcept;
+    void SetBackgroundColor(const QColor& v);
 
-        painter->setBrush(m_backgroundColor);
-        painter->drawRoundedRect(rect, m_cornerRadius, m_cornerRadius);
+    QColor GetBorderColor() const noexcept;
+    void SetBorderColor(const QColor& v);
 
-        if (selected)
-        {
-            QPen selPen(QColor(0, 180, 255), 2, Qt::DashLine);
-            selPen.setCosmetic(true);
-            painter->setPen(selPen);
-            painter->setBrush(Qt::NoBrush);
-            painter->drawRoundedRect(rect, m_cornerRadius, m_cornerRadius);
-        }
+    double GetBorderWidth() const noexcept;
+    void SetBorderWidth(double v);
 
-        painter->restore();
-        return true;
-    }
+    double GetCornerRadius() const noexcept;
+    void SetCornerRadius(double v);
 
-    QColor GetBackgroundColor() const noexcept { return m_backgroundColor; }
-    void SetBackgroundColor(const QColor& v) { if (m_backgroundColor == v) return; m_backgroundColor = v; NotifyChanged(); }
+    void ToJson(QJsonObject& out) const override;
 
-    QColor GetBorderColor() const noexcept { return m_borderColor; }
-    void SetBorderColor(const QColor& v) { if (m_borderColor == v) return; m_borderColor = v; NotifyChanged(); }
-
-    double GetBorderWidth() const noexcept { return m_borderWidth; }
-    void SetBorderWidth(double v) { if (m_borderWidth == v) return; m_borderWidth = v; NotifyChanged(); }
-
-    double GetCornerRadius() const noexcept { return m_cornerRadius; }
-    void SetCornerRadius(double v) { if (m_cornerRadius == v) return; m_cornerRadius = v; NotifyChanged(); }
-
-    void ToJson(QJsonObject& out) const override
-    {
-        out["kind"] = "Panel";
-        out["backgroundColor"] = m_backgroundColor.name(QColor::HexArgb);
-        out["borderColor"] = m_borderColor.name(QColor::HexArgb);
-        out["borderWidth"] = m_borderWidth;
-        out["cornerRadius"] = m_cornerRadius;
-    }
-
-    void FromJson(const QJsonObject& in) override
-    {
-        SetBackgroundColor(QColor(in["backgroundColor"].toString("#C8323237")));
-        SetBorderColor(QColor(in["borderColor"].toString("#FF64646E")));
-        SetBorderWidth(in["borderWidth"].toDouble(1.0));
-        SetCornerRadius(in["cornerRadius"].toDouble(6.0));
-    }
+    void FromJson(const QJsonObject& in) override;
 
 private:
 

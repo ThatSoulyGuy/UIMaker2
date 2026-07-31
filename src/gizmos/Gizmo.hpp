@@ -19,12 +19,7 @@ struct GizmoHandle
 
     GizmoHandle() = default;
 
-    GizmoHandle(const QString& handleId, Qt::CursorShape cursorShape, int handlePriority = 0)
-        : id(handleId)
-        , cursor(cursorShape)
-        , priority(handlePriority)
-    {
-    }
+    GizmoHandle(const QString& handleId, Qt::CursorShape cursorShape, int handlePriority = 0);
 };
 
 struct GizmoContext
@@ -46,10 +41,7 @@ struct GizmoHitResult
     Qt::CursorShape cursor = Qt::ArrowCursor;
     QString tooltip;
 
-    bool IsHit() const noexcept
-    {
-        return !handleId.isEmpty();
-    }
+    bool IsHit() const noexcept;
 };
 
 class Gizmo : public QObject
@@ -58,7 +50,7 @@ class Gizmo : public QObject
 
 public:
 
-    explicit Gizmo(QObject* parent = nullptr) : QObject(parent) { }
+    explicit Gizmo(QObject* parent = nullptr);
 
     virtual ~Gizmo() = default;
 
@@ -71,42 +63,17 @@ public:
 
     virtual QList<GizmoHandle> GetHandles() const = 0;
 
-    virtual Qt::CursorShape GetCursor(const QString& handleId) const
-    {
-        for (const auto& handle : GetHandles())
-        {
-            if (handle.id == handleId)
-                return handle.cursor;
-        }
-
-        return Qt::ArrowCursor;
-    }
+    virtual Qt::CursorShape GetCursor(const QString& handleId) const;
 
     using GizmoFactory = std::function<Gizmo*(QObject*)>;
 
-    static QHash<QString, GizmoFactory>& Registry()
-    {
-        static QHash<QString, GizmoFactory> registry;
+    static QHash<QString, GizmoFactory>& Registry();
 
-        return registry;
-    }
+    static void Register(const QString& id, GizmoFactory factory);
 
-    static void Register(const QString& id, GizmoFactory factory)
-    {
-        Registry().insert(id, factory);
-    }
+    static Gizmo* Create(const QString& id, QObject* parent);
 
-    static Gizmo* Create(const QString& id, QObject* parent)
-    {
-        auto it = Registry().find(id);
-
-        return it != Registry().end() ? it.value()(parent) : nullptr;
-    }
-
-    static QStringList GetRegisteredIds()
-    {
-        return Registry().keys();
-    }
+    static QStringList GetRegisteredIds();
 
 protected:
 

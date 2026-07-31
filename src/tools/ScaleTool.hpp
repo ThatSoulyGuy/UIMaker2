@@ -2,7 +2,6 @@
 #define SCALETOOL_HPP
 
 #include "tools/Tool.hpp"
-#include "input/InputHandler.hpp"
 
 class ScaleTool : public Tool
 {
@@ -10,37 +9,15 @@ class ScaleTool : public Tool
 
 public:
 
-    explicit ScaleTool(QObject* parent = nullptr) : Tool(parent) { }
+    explicit ScaleTool(QObject* parent = nullptr);
 
-    QString GetId() const override
-    {
-        return QStringLiteral("scale");
-    }
+    QString GetId() const override;
 
-    QString GetDisplayName() const override
-    {
-        return tr("Scale");
-    }
+    QString GetDisplayName() const override;
 
-    QKeySequence GetShortcut() const override
-    {
-        return QKeySequence(Qt::Key_R);
-    }
+    QKeySequence GetShortcut() const override;
 
-    QString GetGizmoId() const override
-    {
-        return QStringLiteral("scale");
-    }
-
-    InputHandler* CreateInputHandler() override
-    {
-        // Input handling is centralized in ToolManager
-        return nullptr;
-    }
-
-private:
-
-    static const bool registered;
+    QString GetGizmoId() const override;
 
 };
 

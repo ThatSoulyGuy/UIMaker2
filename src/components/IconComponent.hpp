@@ -4,11 +4,9 @@
 #include <QColor>
 #include <QString>
 #include <QPixmap>
-#include <QPainter>
-#include <QPen>
+#include <QDateTime>
 
 #include "core/Component.hpp"
-#include "core/AssetContext.hpp"
 
 class IconComponent : public Component
 {
@@ -22,108 +20,38 @@ class IconComponent : public Component
 
 public:
 
-    explicit IconComponent(QObject* parent = nullptr)
-        : Component(parent)
-        , m_tintColor(Qt::white)
-        , m_iconSize(32)
-    { }
+    explicit IconComponent(QObject* parent = nullptr);
 
-    QString GetTypeName() const override { return QStringLiteral("Icon"); }
+    QString GetTypeName() const override;
 
-    void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override
-    {
-        Q_UNUSED(item);
-        Q_UNUSED(parentRect);
+    void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override;
 
-        rect = QRectF(0, 0, m_iconSize, m_iconSize);
-    }
+    bool Paint(QPainter* painter, const QRectF& rect, bool selected) override;
 
-    bool Paint(QPainter* painter, const QRectF& rect, bool selected) override
-    {
-        painter->save();
-        painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    QString GetImagePath() const noexcept;
+    void SetImagePath(const QString& v);
 
-        if (!m_pixmap.isNull())
-        {
-            painter->setOpacity(1.0);
-            painter->drawPixmap(rect, m_pixmap, QRectF(QPointF(0, 0), QSizeF(m_pixmap.size())));
-        }
-        else
-        {
-            // Draw placeholder icon frame
-            QPen pen(QColor(150, 150, 160), 1, Qt::DashLine);
-            pen.setCosmetic(true);
-            painter->setPen(pen);
-            painter->setBrush(QColor(50, 50, 55, 100));
-            painter->drawRect(rect);
+    QColor GetTintColor() const noexcept;
+    void SetTintColor(const QColor& v);
 
-            painter->setPen(QColor(150, 150, 160));
-            QFont font;
-            font.setPixelSize(std::max(10, m_iconSize / 3));
-            painter->setFont(font);
-            painter->drawText(rect, Qt::AlignCenter, "ICO");
-        }
+    int GetIconSize() const noexcept;
+    void SetIconSize(int v);
 
-        if (selected)
-        {
-            QPen selPen(QColor(0, 180, 255), 2, Qt::DashLine);
-            selPen.setCosmetic(true);
-            painter->setPen(selPen);
-            painter->setBrush(Qt::NoBrush);
-            painter->drawRect(rect);
-        }
+    QString GetAssetDomain() const noexcept;
+    void SetAssetDomain(const QString& v);
 
-        painter->restore();
-        return true;
-    }
+    QString GetAssetRegistryValue() const noexcept;
+    void SetAssetRegistryValue(const QString& v);
 
-    QString GetImagePath() const noexcept { return m_imagePath; }
-    void SetImagePath(const QString& v)
-    {
-        if (m_imagePath == v) return;
-        m_imagePath = v;
-        m_pixmap = QPixmap();
-        if (!m_imagePath.isEmpty())
-        {
-            QPixmap loaded(AssetContext::Resolve(m_imagePath));
-            if (!loaded.isNull())
-                m_pixmap = loaded;
-        }
-        NotifyChanged();
-    }
+    void ToJson(QJsonObject& out) const override;
 
-    QColor GetTintColor() const noexcept { return m_tintColor; }
-    void SetTintColor(const QColor& v) { if (m_tintColor == v) return; m_tintColor = v; NotifyChanged(); }
-
-    int GetIconSize() const noexcept { return m_iconSize; }
-    void SetIconSize(int v) { if (m_iconSize == v) return; m_iconSize = v; NotifyChanged(); }
-
-    QString GetAssetDomain() const noexcept { return m_assetDomain; }
-    void SetAssetDomain(const QString& v) { if (m_assetDomain == v) return; m_assetDomain = v; NotifyChanged(); }
-
-    QString GetAssetRegistryValue() const noexcept { return m_assetRegistryValue; }
-    void SetAssetRegistryValue(const QString& v) { if (m_assetRegistryValue == v) return; m_assetRegistryValue = v; NotifyChanged(); }
-
-    void ToJson(QJsonObject& out) const override
-    {
-        out["kind"] = "Icon";
-        out["imagePath"] = m_imagePath;
-        out["tintColor"] = m_tintColor.name(QColor::HexArgb);
-        out["iconSize"] = m_iconSize;
-        out["assetDomain"] = m_assetDomain;
-        out["assetRegistryValue"] = m_assetRegistryValue;
-    }
-
-    void FromJson(const QJsonObject& in) override
-    {
-        SetImagePath(in["imagePath"].toString());
-        SetTintColor(QColor(in["tintColor"].toString("#FFFFFFFF")));
-        SetIconSize(in["iconSize"].toInt(32));
-        SetAssetDomain(in["assetDomain"].toString());
-        SetAssetRegistryValue(in["assetRegistryValue"].toString());
-    }
+    void FromJson(const QJsonObject& in) override;
 
 private:
+
+    void ReloadPixmap();
+
+    const QPixmap& EnsureTintedPixmap();
 
     QString m_imagePath;
     QColor m_tintColor;
@@ -131,6 +59,10 @@ private:
     QString m_assetDomain;
     QString m_assetRegistryValue;
     QPixmap m_pixmap;
+    QString m_resolvedPath;
+    QDateTime m_resolvedMtime;
+    QPixmap m_tintedPixmap;
+    QColor m_tintedPixmapColor;
 };
 
 #endif

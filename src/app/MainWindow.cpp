@@ -1,7 +1,7 @@
+#include <algorithm>
 #include <QClipboard>
 #include <QMessageBox>
 #include <QTimer>
-#include <QClipboard>
 #include <QMimeData>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -13,49 +13,18 @@
 #include <QFileInfo>
 #include <QItemSelection>
 #include <QSignalBlocker>
+#include "core/UiElement.hpp"
+#include "core/Component.hpp"
+#include "components/TransformComponent.hpp"
+#include "tools/ToolManager.hpp"
 #include "scene/SceneElementItem.hpp"
 #include "scene/SceneExporter.hpp"
+#include "scene/SceneDocument.hpp"
 #include "app/MainWindow.hpp"
+#include "ui/EntityTreeModel.hpp"
+#include "ui/PropertyEditorPanel.hpp"
 #include "ui/ViewportWidget.hpp"
 #include "./ui_mainwindow.h"
-
-MainWindow* MainWindow::s_instance = nullptr;
-
-// Whole-scene snapshot command. Retained as a fallback (e.g. for the menu
-// "Load" path or other future blanket replacements); the interactive editor
-// flows have moved to the delta-based commands below, which avoid the full
-// scene rebuild that made big hierarchies freeze on mouseup.
-class JsonSceneCommand : public QUndoCommand
-{
-
-public:
-
-    JsonSceneCommand(MainWindow* mw, QByteArray before, QByteArray after, QString text) : QUndoCommand(std::move(text)), mw(mw), before(std::move(before)), after(std::move(after)) { }
-
-    void undo() override
-    {
-        if (mw)
-            mw->ApplySceneJson(before);
-    }
-
-    void redo() override
-    {
-        if (firstRedo)
-        {
-            firstRedo = false;
-            return;
-        }
-
-        if (mw)
-            mw->ApplySceneJson(after);
-    }
-
-private:
-
-    MainWindow* mw;
-    QByteArray before, after;
-    bool firstRedo = true;
-};
 
 // Apply a TransformDelta to whichever element currently carries its id. Used
 // by both undo() (applies the "before" pose) and redo() (the "after" pose).
@@ -134,9 +103,10 @@ private:
 //                 the subtree at (parentId, row) from json, preserving the id.
 //
 // json is the FULL subtree serialisation, so recreate restores all descendants
-// in one pass. row is the index in the parent's child list at the moment the
-// op was recorded - on recreate the element is moved to that row via
-// UiElement::ReparentTo which clamps to current child count.
+// in one pass. row is the index among the parent's child *elements* at the
+// moment the op was recorded (see RowInParent below) - on recreate the element
+// is moved to that row via UiElement::ReparentTo which clamps out-of-range
+// values to append.
 struct StructuralOp
 {
     enum Kind { Add, Remove };
@@ -178,15 +148,16 @@ static void RemoveById(SceneDocument* doc, const QUuid& id)
 }
 
 // Delta-based undo command for structural changes (paste, cut, duplicate,
-// delete - eventually reparent). Stores a list of StructuralOps recorded in
-// the order they were performed. redo() replays forward, undo() walks the
-// same list and applies the inverse of each op.
+// delete - eventually reparent). Stores a list of StructuralOps. redo()
+// replays forward, undo() walks the same list and applies the inverse of
+// each op.
 //
 // Forward iteration on undo is deliberate: for Remove ops whose recreation
-// uses recorded row indices, the rows are captured in ascending order at
-// record time and walking forward keeps insertion math consistent. For Add
-// ops the inverse (delete-by-id) is order-independent so forward iteration
-// is fine there too.
+// uses recorded row indices, the ops are sorted into ascending (parent, row)
+// order before the command is built (see SortOpsForReplay) and walking
+// forward keeps insertion math consistent. For Add ops the inverse
+// (delete-by-id) is order-independent so forward iteration is fine there
+// too.
 class StructuralCommand : public QUndoCommand
 {
 
@@ -230,26 +201,197 @@ private:
     bool firstRedo = true;
 };
 
-// Raw position of this element in its parent's QObject children list. This
-// matches the index space that UiElement::ReparentTo expects for insertPos -
-// it includes the parent's own Components, which sit before any child
-// UiElements. Capture and replay use the same index space, so the value is
-// stable across delete+recreate as long as the parent's component set is
-// unchanged between the two (which is the steady-state in this editor).
+// Undo command for a hierarchy drag-drop reparent. Rows are final indices
+// among the parent's child elements (the index space UiElement::ReparentTo
+// uses), so replay is unaffected by the parents' component sets. A null
+// parent id means the document root.
+class ReparentCommand : public QUndoCommand
+{
+
+public:
+
+    ReparentCommand(SceneDocument* doc, const QUuid& elementId,
+                    const QUuid& oldParentId, int oldRow,
+                    const QUuid& newParentId, int newRow)
+        : QUndoCommand(QStringLiteral("Reparent")), doc(doc), elementId(elementId),
+          oldParentId(oldParentId), oldRow(oldRow), newParentId(newParentId), newRow(newRow) { }
+
+    void undo() override
+    {
+        Move(oldParentId, oldRow);
+    }
+
+    void redo() override
+    {
+        if (firstRedo)
+        {
+            firstRedo = false;
+            return;
+        }
+
+        Move(newParentId, newRow);
+    }
+
+private:
+
+    void Move(const QUuid& parentId, int row)
+    {
+        if (!doc)
+            return;
+
+        UiElement* element = doc->FindById(elementId);
+        UiElement* parent  = parentId.isNull() ? doc->GetRoot() : doc->FindById(parentId);
+
+        if (element && parent)
+            element->ReparentTo(parent, row);
+    }
+
+    SceneDocument* doc;
+    QUuid elementId;
+    QUuid oldParentId;
+    int oldRow;
+    QUuid newParentId;
+    int newRow;
+    bool firstRedo = true;
+};
+
+// Undo command for property-panel edits. Stores one (before, after) pair per
+// touched object, resolved by element id + component kind so undo/redo work
+// on whichever objects currently carry those ids. Consecutive edits of the
+// same property on the same objects merge, so a spinbox drag or per-keystroke
+// text commit collapses into one undo step.
+class PropertyEditCommand : public QUndoCommand
+{
+
+public:
+
+    PropertyEditCommand(SceneDocument* doc, QList<PropertyEditRecord> recordsIn)
+        : QUndoCommand(), doc(doc), records(std::move(recordsIn))
+    {
+        setText(QStringLiteral("Edit %1").arg(QString::fromLatin1(records.value(0).propName)));
+
+        for (const PropertyEditRecord& r : records)
+            key += r.elementId.toString() + QLatin1Char('/') + r.componentKind + QLatin1Char('/') + QString::fromLatin1(r.propName) + QLatin1Char(';');
+    }
+
+    int id() const override { return kCommandId; }
+
+    bool mergeWith(const QUndoCommand* other) override
+    {
+        auto* o = static_cast<const PropertyEditCommand*>(other);
+
+        if (o->key != key || o->records.size() != records.size())
+            return false;
+
+        for (int i = 0; i < records.size(); ++i)
+            records[i].after = o->records[i].after;
+
+        return true;
+    }
+
+    void undo() override
+    {
+        Apply(/*useAfter=*/false);
+    }
+
+    void redo() override
+    {
+        if (firstRedo)
+        {
+            firstRedo = false;
+            return;
+        }
+
+        Apply(/*useAfter=*/true);
+    }
+
+private:
+
+    static constexpr int kCommandId = 0x504F;
+
+    void Apply(bool useAfter)
+    {
+        if (!doc)
+            return;
+
+        for (const PropertyEditRecord& r : records)
+        {
+            UiElement* el = doc->FindById(r.elementId);
+            if (!el)
+                continue;
+
+            const QVariant& v = useAfter ? r.after : r.before;
+
+            if (r.componentKind.isEmpty())
+            {
+                el->setProperty(r.propName.constData(), v);
+                continue;
+            }
+
+            for (Component* c : el->GetComponents())
+            {
+                if (c->GetTypeName() == r.componentKind)
+                {
+                    c->setProperty(r.propName.constData(), v);
+                    break;
+                }
+            }
+        }
+    }
+
+    SceneDocument* doc;
+    QList<PropertyEditRecord> records;
+    QString key;
+    bool firstRedo = true;
+};
+
+// Undo replay walks Remove ops forward and re-inserts each subtree at its
+// recorded row, which is only correct in ascending (parent, row) order. The
+// capture order is the selection order - arbitrary click order - so sort
+// before building the command.
+static void SortOpsForReplay(QList<StructuralOp>& ops)
+{
+    std::sort(ops.begin(), ops.end(), [](const StructuralOp& a, const StructuralOp& b)
+    {
+        if (a.parentId != b.parentId)
+            return a.parentId < b.parentId;
+
+        return a.row < b.row;
+    });
+}
+
+// Position of this element among its parent's child *elements* (components
+// are not counted). This matches the index space UiElement::ReparentTo takes
+// for insertPos, and unlike a raw QObject children index it stays stable
+// across delete+recreate even if the parent's component set changes between
+// the two.
 static int RowInParent(UiElement* e)
 {
     if (!e)
         return -1;
+
     auto* parent = qobject_cast<UiElement*>(e->parent());
     if (!parent)
         return -1;
-    return parent->children().indexOf(e);
+
+    int row = 0;
+
+    for (QObject* c : parent->children())
+    {
+        if (auto* el = qobject_cast<UiElement*>(c))
+        {
+            if (el == e)
+                return row;
+            ++row;
+        }
+    }
+
+    return -1;
 }
 
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::UIMaker2)
 {
-    s_instance = this;
     ui->setupUi(this);
     undoStack = new QUndoStack(this);
 
@@ -315,67 +457,6 @@ QList<UiElement*> MainWindow::SelectedElements() const
     return result;
 }
 
-void MainWindow::ApplySceneJson(const QByteArray& bytes)
-{
-    if (!document)
-        return;
-
-    // Save the selected element ids before LoadJson destroys the elements. Ids are
-    // preserved across the JSON round-trip (see SceneDocument::CreateElementFromJson),
-    // so the entire multiselection can be restored, not just one element by name.
-    QList<QUuid> selectedIds;
-    for (UiElement* e : document->GetSelectedElements())
-    {
-        if (e)
-            selectedIds.append(e->GetId());
-    }
-
-    if (!document->LoadJson(bytes))
-        return;
-
-    // Don't call SetDocument or AttachScene - scene pointer hasn't changed,
-    // and AttachScene triggers fitInView which recenters the viewport.
-
-    delete hierarchyModel;
-    hierarchyModel = new EntityTreeModel(document->GetRoot(), this);
-
-    delete hierarchySelection;
-    hierarchySelection = new QItemSelectionModel(hierarchyModel, this);
-
-    hierarchyView->setModel(hierarchyModel);
-    hierarchyView->setSelectionModel(hierarchySelection);
-    WireHierarchySignals();
-
-    // Restore selection by id.
-    QList<UiElement*> restored;
-    if (!selectedIds.isEmpty())
-    {
-        const QList<UiElement*> all = document->GetRoot()->findChildren<UiElement*>();
-        for (const QUuid& id : selectedIds)
-        {
-            for (UiElement* e : all)
-            {
-                if (e->GetId() == id)
-                {
-                    restored.append(e);
-                    break;
-                }
-            }
-        }
-    }
-
-    if (!restored.isEmpty())
-    {
-        // SceneDocument::SelectionChanged listener mirrors this back to the tree view
-        // and the property panel, so no need to touch them directly here.
-        document->SetSelectedElements(restored);
-    }
-    else
-    {
-        propertyPanel->SetTarget(document->GetRoot());
-    }
-}
-
 void MainWindow::onTransformCompleted(const QList<TransformDelta>& deltas, const QString& actionName)
 {
     if (deltas.isEmpty())
@@ -431,6 +512,14 @@ void MainWindow::BuildPropertyDock()
             document->SetBaseDir(dir);
     });
 
+    // The panel has already applied the change; the command's first redo() is
+    // a no-op and consecutive edits of the same property merge (see
+    // PropertyEditCommand).
+    connect(propertyPanel, &PropertyEditorPanel::PropertyChangeApplied, this, [this](const QList<PropertyEditRecord>& records)
+    {
+        undoStack->push(new PropertyEditCommand(document, records));
+    });
+
     propertyPanel->SetTarget(document->GetRoot());
 }
 
@@ -479,92 +568,48 @@ void MainWindow::BuildToolbar()
     });
 }
 
+void MainWindow::FinishAddElement(UiElement* e, const QString& name)
+{
+    if (!e)
+        return;
+
+    // The element already exists in the document; record an Add op so undo can
+    // delete it by id and redo can recreate it in place (same pattern as
+    // paste/duplicate - the command's first redo() is a no-op).
+    StructuralOp op;
+    op.kind     = StructuralOp::Add;
+    op.id       = e->GetId();
+    auto* p     = qobject_cast<UiElement*>(e->parent());
+    op.parentId = p ? p->GetId() : QUuid();
+    op.row      = RowInParent(e);
+    e->ToJson(op.json);
+
+    undoStack->push(new StructuralCommand(document, { op }, "Add " + name));
+
+    hierarchyModel->OnStructureChanged();
+
+    auto idx = hierarchyModel->GetIndexFromElement(e);
+    hierarchySelection->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+
+    propertyPanel->SetTarget(e);
+}
+
 void MainWindow::ConnectActions()
 {
-    connect(ui->ActionAddText, &QAction::triggered, this, [this]()
-    {
-        UiElement* e = document->CreateTextElement("Text", nullptr);
-
-        hierarchyModel->OnStructureChanged();
-
-        auto idx = hierarchyModel->GetIndexFromElement(e); hierarchySelection->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-
-        propertyPanel->SetTarget(e);
-    });
-
-    connect(ui->ActionAddImage, &QAction::triggered, this, [this]()
-    {
-        UiElement* e = document->CreateImageElement("Image", nullptr);
-
-        hierarchyModel->OnStructureChanged();
-
-        auto idx = hierarchyModel->GetIndexFromElement(e); hierarchySelection->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-
-        propertyPanel->SetTarget(e);
-    });
-
-    connect(ui->ActionAddButton, &QAction::triggered, this, [this]()
-    {
-        UiElement* e = document->CreateButtonElement("Button", nullptr);
-
-        hierarchyModel->OnStructureChanged();
-
-        auto idx = hierarchyModel->GetIndexFromElement(e); hierarchySelection->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-
-        propertyPanel->SetTarget(e);
-    });
-
-    connect(ui->ActionAddStackLayout, &QAction::triggered, this, [this]()
-    {
-        UiElement* e = document->CreateStackLayoutElement("StackLayout", nullptr);
-
-        hierarchyModel->OnStructureChanged();
-
-        auto idx = hierarchyModel->GetIndexFromElement(e);
-        hierarchySelection->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-
-        propertyPanel->SetTarget(e);
-    });
-
-    connect(ui->ActionAddGridLayout, &QAction::triggered, this, [this]()
-    {
-        UiElement* e = document->CreateGridLayoutElement("GridLayout", nullptr);
-
-        hierarchyModel->OnStructureChanged();
-
-        auto idx = hierarchyModel->GetIndexFromElement(e);
-        hierarchySelection->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-
-        propertyPanel->SetTarget(e);
-    });
-
-    connect(ui->ActionAddScrollBox, &QAction::triggered, this, [this]()
-    {
-        UiElement* e = document->CreateScrollBoxElement("ScrollBox", nullptr);
-
-        hierarchyModel->OnStructureChanged();
-
-        auto idx = hierarchyModel->GetIndexFromElement(e);
-        hierarchySelection->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-
-        propertyPanel->SetTarget(e);
-    });
-
     auto connectAddAction = [this](QAction* action, const QString& name, auto createFn)
     {
         connect(action, &QAction::triggered, this, [this, name, createFn]()
         {
-            UiElement* e = (document->*createFn)(name, nullptr);
-
-            hierarchyModel->OnStructureChanged();
-
-            auto idx = hierarchyModel->GetIndexFromElement(e);
-            hierarchySelection->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-
-            propertyPanel->SetTarget(e);
+            FinishAddElement((document->*createFn)(name, nullptr), name);
         });
     };
 
+    connectAddAction(ui->ActionAddText, "Text", &SceneDocument::CreateTextElement);
+    connectAddAction(ui->ActionAddImage, "Image", &SceneDocument::CreateImageElement);
+    connectAddAction(ui->ActionAddButton, "Button", &SceneDocument::CreateButtonElement);
+    connectAddAction(ui->ActionAddStackLayout, "StackLayout", &SceneDocument::CreateStackLayoutElement);
+    connectAddAction(ui->ActionAddGridLayout, "GridLayout", &SceneDocument::CreateGridLayoutElement);
+    connectAddAction(ui->ActionAddScrollBox, "ScrollBox", &SceneDocument::CreateScrollBoxElement);
     connectAddAction(ui->ActionAddPanel, "Panel", &SceneDocument::CreatePanelElement);
     connectAddAction(ui->ActionAddProgressBar, "ProgressBar", &SceneDocument::CreateProgressBarElement);
     connectAddAction(ui->ActionAddToggle, "Toggle", &SceneDocument::CreateToggleElement);
@@ -582,6 +627,10 @@ void MainWindow::ConnectActions()
 
     connect(ui->ActionNew, &QAction::triggered, this, [this]()
     {
+        // Undo commands hold raw pointers into the old document; drop them
+        // before it goes away or Ctrl+Z would dereference freed memory.
+        undoStack->clear();
+
         delete document;
 
         document = new SceneDocument(this);
@@ -589,6 +638,7 @@ void MainWindow::ConnectActions()
         document->SetBaseDir(QString());
 
         m_viewport->SetDocument(document);
+        AttachScene(document->GetScene());
 
         delete hierarchyModel;
         hierarchyModel = new EntityTreeModel(document->GetRoot(), this);
@@ -663,6 +713,10 @@ void MainWindow::ConnectActions()
             return;
         }
 
+        // Undo commands hold raw pointers into the old document; drop them
+        // before it goes away or Ctrl+Z would dereference freed memory.
+        undoStack->clear();
+
         delete document;
         document = newDoc;
 
@@ -718,12 +772,19 @@ void MainWindow::WireHierarchySignals()
     {
         hierarchyView->expandAll();
     });
+
+    // The model has already performed the reparent; the command's first
+    // redo() is a no-op.
+    connect(hierarchyModel, &EntityTreeModel::ElementReparented, this,
+        [this](const QUuid& elementId, const QUuid& oldParentId, int oldRow, const QUuid& newParentId, int newRow)
+    {
+        undoStack->push(new ReparentCommand(document, elementId, oldParentId, oldRow, newParentId, newRow));
+    });
 }
 
 
 void MainWindow::AttachScene(QGraphicsScene* scene)
 {
-    QObject::disconnect(sceneRectChangedConnection);
     QObject::disconnect(sceneSelectionConnection);
 
     if (!scene) return;
@@ -921,7 +982,10 @@ void MainWindow::DoCut()
         document->DeleteElement(e);
 
     if (!ops.isEmpty())
+    {
+        SortOpsForReplay(ops);
         undoStack->push(new StructuralCommand(document, ops, "Cut"));
+    }
 }
 
 void MainWindow::DoDuplicate()
@@ -970,9 +1034,9 @@ void MainWindow::DoDelete()
     if (targets.isEmpty())
         return;
 
-    // Snapshot subtrees first (ascending row order is preserved by walking
-    // SelectedElements in the order Qt returned them; we rely on that for
-    // correct re-insertion on undo). Then perform the deletions.
+    // Snapshot subtrees first, then perform the deletions. The ops are sorted
+    // into (parent, row) order before the command is built - selection order
+    // is arbitrary and replay depends on ascending rows.
     QList<StructuralOp> ops;
     for (UiElement* e : targets)
     {
@@ -993,17 +1057,34 @@ void MainWindow::DoDelete()
         document->DeleteElement(e);
 
     if (!ops.isEmpty())
+    {
+        SortOpsForReplay(ops);
         undoStack->push(new StructuralCommand(document, ops, "Delete"));
+    }
 }
 
 void MainWindow::DoUndo()
 {
-    if (undoStack)
-        undoStack->undo();
+    if (!undoStack)
+        return;
+
+    undoStack->undo();
+
+    // Property writes land synchronously but notify through queued
+    // connections, and the panel defers rebuilds while one of its editors
+    // has focus - which would leave stale text a later keystroke re-applies.
+    // Refresh unconditionally instead.
+    if (propertyPanel)
+        propertyPanel->RefreshTargets();
 }
 
 void MainWindow::DoRedo()
 {
-    if (undoStack)
-        undoStack->redo();
+    if (!undoStack)
+        return;
+
+    undoStack->redo();
+
+    if (propertyPanel)
+        propertyPanel->RefreshTargets();
 }

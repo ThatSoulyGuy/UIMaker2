@@ -15,17 +15,11 @@ public:
     explicit SceneElementItem(UiElement* element);
     ~SceneElementItem() override = default;
 
-    QRectF boundingRect() const override
-    {
-        return localRect;
-    }
+    QRectF boundingRect() const override;
 
     void paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget) override;
 
-    UiElement* GetElement() const noexcept
-    {
-        return element;
-    }
+    UiElement* GetElement() const noexcept;
 
     void setPosFromComponent(const QPointF& p);
     void setRotationFromComponent(double deg);

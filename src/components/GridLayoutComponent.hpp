@@ -3,6 +3,7 @@
 
 #include <QPainter>
 #include <QPen>
+#include <QList>
 #include <algorithm>
 #include <vector>
 
@@ -19,50 +20,36 @@ class GridLayoutComponent : public Component
 
 public:
 
-    explicit GridLayoutComponent(QObject* parent = nullptr)
-        : Component(parent), m_columns(2), m_spacingH(8.0), m_spacingV(8.0), m_padding(8.0) { }
+    explicit GridLayoutComponent(QObject* parent = nullptr);
 
-    QString GetTypeName() const override { return QStringLiteral("GridLayout"); }
-    int UpdateOrder() const override { return 100; }
-    bool IsLayout() const override { return true; }
+    QString GetTypeName() const override;
+    int UpdateOrder() const override;
+    bool IsLayout() const override;
 
     void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override;
     bool Paint(QPainter* painter, const QRectF& rect, bool selected) override;
 
-    int GetColumns() const noexcept { return m_columns; }
-    void SetColumns(int v) { v = std::max(1, v); if (m_columns == v) return; m_columns = v; NotifyChanged(); }
+    int GetColumns() const noexcept;
+    void SetColumns(int v);
 
-    double GetSpacingH() const noexcept { return m_spacingH; }
-    void SetSpacingH(double v) { if (m_spacingH == v) return; m_spacingH = v; NotifyChanged(); }
+    double GetSpacingH() const noexcept;
+    void SetSpacingH(double v);
 
-    double GetSpacingV() const noexcept { return m_spacingV; }
-    void SetSpacingV(double v) { if (m_spacingV == v) return; m_spacingV = v; NotifyChanged(); }
+    double GetSpacingV() const noexcept;
+    void SetSpacingV(double v);
 
-    double GetPadding() const noexcept { return m_padding; }
-    void SetPadding(double v) { if (m_padding == v) return; m_padding = v; NotifyChanged(); }
+    double GetPadding() const noexcept;
+    void SetPadding(double v);
 
 private slots:
 
-    void OnChildChanged() { NotifyChanged(); }
+    void OnChildChanged();
 
 public:
 
-    void ToJson(QJsonObject& out) const override
-    {
-        out["kind"] = "GridLayout";
-        out["columns"] = m_columns;
-        out["spacingH"] = m_spacingH;
-        out["spacingV"] = m_spacingV;
-        out["padding"] = m_padding;
-    }
+    void ToJson(QJsonObject& out) const override;
 
-    void FromJson(const QJsonObject& in) override
-    {
-        SetColumns(in["columns"].toInt(2));
-        SetSpacingH(in["spacingH"].toDouble(8.0));
-        SetSpacingV(in["spacingV"].toDouble(8.0));
-        SetPadding(in["padding"].toDouble(8.0));
-    }
+    void FromJson(const QJsonObject& in) override;
 
 private:
 
@@ -70,6 +57,8 @@ private:
     double m_spacingH;
     double m_spacingV;
     double m_padding;
+
+    QList<QMetaObject::Connection> m_childConnections;
 };
 
 #endif

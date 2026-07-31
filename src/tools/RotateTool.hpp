@@ -2,7 +2,6 @@
 #define ROTATETOOL_HPP
 
 #include "tools/Tool.hpp"
-#include "input/InputHandler.hpp"
 
 class RotateTool : public Tool
 {
@@ -10,37 +9,15 @@ class RotateTool : public Tool
 
 public:
 
-    explicit RotateTool(QObject* parent = nullptr) : Tool(parent) { }
+    explicit RotateTool(QObject* parent = nullptr);
 
-    QString GetId() const override
-    {
-        return QStringLiteral("rotate");
-    }
+    QString GetId() const override;
 
-    QString GetDisplayName() const override
-    {
-        return tr("Rotate");
-    }
+    QString GetDisplayName() const override;
 
-    QKeySequence GetShortcut() const override
-    {
-        return QKeySequence(Qt::Key_E);
-    }
+    QKeySequence GetShortcut() const override;
 
-    QString GetGizmoId() const override
-    {
-        return QStringLiteral("rotate");
-    }
-
-    InputHandler* CreateInputHandler() override
-    {
-        // Input handling is centralized in ToolManager
-        return nullptr;
-    }
-
-private:
-
-    static const bool registered;
+    QString GetGizmoId() const override;
 
 };
 

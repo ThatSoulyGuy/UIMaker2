@@ -3,6 +3,7 @@
 
 #include <QPainter>
 #include <QPen>
+#include <QList>
 #include <algorithm>
 
 #include "core/Component.hpp"
@@ -19,52 +20,42 @@ public:
 
     enum Direction { Vertical = 0, Horizontal = 1 };
 
-    explicit ScrollBoxComponent(QObject* parent = nullptr)
-        : Component(parent), m_direction(Vertical), m_spacing(8.0), m_padding(8.0) { }
+    explicit ScrollBoxComponent(QObject* parent = nullptr);
 
-    QString GetTypeName() const override { return QStringLiteral("ScrollBox"); }
-    int UpdateOrder() const override { return 100; }
-    bool IsLayout() const override { return true; }
+    QString GetTypeName() const override;
+    int UpdateOrder() const override;
+    bool IsLayout() const override;
 
     void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override;
     bool Paint(QPainter* painter, const QRectF& rect, bool selected) override;
 
-    int GetDirectionInt() const noexcept { return m_direction; }
-    void SetDirectionInt(int v) { SetDirection(static_cast<Direction>(v)); }
+    int GetDirectionInt() const noexcept;
+    void SetDirectionInt(int v);
 
-    Direction GetDirection() const noexcept { return m_direction; }
-    void SetDirection(Direction v) { if (m_direction == v) return; m_direction = v; NotifyChanged(); }
+    Direction GetDirection() const noexcept;
+    void SetDirection(Direction v);
 
-    double GetSpacing() const noexcept { return m_spacing; }
-    void SetSpacing(double v) { if (m_spacing == v) return; m_spacing = v; NotifyChanged(); }
+    double GetSpacing() const noexcept;
+    void SetSpacing(double v);
 
-    double GetPadding() const noexcept { return m_padding; }
-    void SetPadding(double v) { if (m_padding == v) return; m_padding = v; NotifyChanged(); }
+    double GetPadding() const noexcept;
+    void SetPadding(double v);
 
-    void ToJson(QJsonObject& out) const override
-    {
-        out["kind"] = "ScrollBox";
-        out["direction"] = static_cast<int>(m_direction);
-        out["spacing"] = m_spacing;
-        out["padding"] = m_padding;
-    }
+    void ToJson(QJsonObject& out) const override;
 
-    void FromJson(const QJsonObject& in) override
-    {
-        SetDirection(static_cast<Direction>(in["direction"].toInt(0)));
-        SetSpacing(in["spacing"].toDouble(8.0));
-        SetPadding(in["padding"].toDouble(8.0));
-    }
+    void FromJson(const QJsonObject& in) override;
 
 private slots:
 
-    void OnChildChanged() { NotifyChanged(); }
+    void OnChildChanged();
 
 private:
 
     Direction m_direction;
     double m_spacing;
     double m_padding;
+
+    QList<QMetaObject::Connection> m_childConnections;
 };
 
 #endif

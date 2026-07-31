@@ -17,20 +17,9 @@ struct InputResult
     bool needsRepaint = false;
     QString statusMessage;
 
-    static InputResult Consumed(Qt::CursorShape cursorShape = Qt::ArrowCursor, bool repaint = true)
-    {
-        InputResult result;
-        result.consumed = true;
-        result.cursor = cursorShape;
-        result.needsRepaint = repaint;
+    static InputResult Consumed(Qt::CursorShape cursorShape = Qt::ArrowCursor, bool repaint = true);
 
-        return result;
-    }
-
-    static InputResult NotConsumed()
-    {
-        return InputResult();
-    }
+    static InputResult NotConsumed();
 };
 
 class InputHandler : public QObject
@@ -39,7 +28,7 @@ class InputHandler : public QObject
 
 public:
 
-    explicit InputHandler(QObject* parent = nullptr) : QObject(parent) { }
+    explicit InputHandler(QObject* parent = nullptr);
 
     virtual ~InputHandler() = default;
 
@@ -47,44 +36,17 @@ public:
     virtual InputResult HandleMove(const MouseMoveEvent& event, EditorContext& ctx) = 0;
     virtual InputResult HandleRelease(const MouseReleaseEvent& event, EditorContext& ctx) = 0;
 
-    virtual InputResult HandleDoubleClick(const MouseDoubleClickEvent& event, EditorContext& ctx)
-    {
-        Q_UNUSED(event);
-        Q_UNUSED(ctx);
+    virtual InputResult HandleDoubleClick(const MouseDoubleClickEvent& event, EditorContext& ctx);
 
-        return InputResult::NotConsumed();
-    }
+    virtual InputResult HandleWheel(const WheelEvent& event, EditorContext& ctx);
 
-    virtual InputResult HandleWheel(const WheelEvent& event, EditorContext& ctx)
-    {
-        Q_UNUSED(event);
-        Q_UNUSED(ctx);
+    virtual InputResult HandleKeyPress(const KeyPressEvent& event, EditorContext& ctx);
 
-        return InputResult::NotConsumed();
-    }
+    virtual bool IsTransforming() const noexcept;
 
-    virtual InputResult HandleKeyPress(const KeyPressEvent& event, EditorContext& ctx)
-    {
-        Q_UNUSED(event);
-        Q_UNUSED(ctx);
+    virtual QString GetActiveHandleId() const;
 
-        return InputResult::NotConsumed();
-    }
-
-    virtual bool IsTransforming() const noexcept
-    {
-        return false;
-    }
-
-    virtual QString GetActiveHandleId() const
-    {
-        return QString();
-    }
-
-    virtual QString GetUndoActionName() const
-    {
-        return QString();
-    }
+    virtual QString GetUndoActionName() const;
 
 signals:
 

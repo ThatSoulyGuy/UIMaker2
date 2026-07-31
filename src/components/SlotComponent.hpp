@@ -14,62 +14,25 @@ class SlotComponent : public Component
 
 public:
 
-    explicit SlotComponent(QObject* parent = nullptr) : Component(parent), m_slotIndex(0) { }
+    explicit SlotComponent(QObject* parent = nullptr);
 
-    QString GetTypeName() const override
-    {
-        return QStringLiteral("Slot");
-    }
+    QString GetTypeName() const override;
 
-    int UpdateOrder() const override
-    {
-        return 100;
-    }
+    int UpdateOrder() const override;
 
     void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override;
 
-    int GetSlotIndex() const noexcept
-    {
-        return m_slotIndex;
-    }
+    int GetSlotIndex() const noexcept;
 
-    void SetSlotIndex(int v)
-    {
-        if (m_slotIndex == v)
-            return;
+    void SetSlotIndex(int v);
 
-        m_slotIndex = v;
+    QString GetMasterKind() const noexcept;
 
-        NotifyChanged();
-    }
+    void SetMasterKind(const QString& v);
 
-    QString GetMasterKind() const noexcept
-    {
-        return m_masterKind;
-    }
+    void ToJson(QJsonObject& out) const override;
 
-    void SetMasterKind(const QString& v)
-    {
-        if (m_masterKind == v)
-            return;
-
-        m_masterKind = v;
-
-        NotifyChanged();
-    }
-
-    void ToJson(QJsonObject& out) const override
-    {
-        out["kind"] = "Slot";
-        out["slotIndex"] = m_slotIndex;
-        out["masterKind"] = m_masterKind;
-    }
-
-    void FromJson(const QJsonObject& in) override
-    {
-        SetSlotIndex(in["slotIndex"].toInt(0));
-        SetMasterKind(in["masterKind"].toString());
-    }
+    void FromJson(const QJsonObject& in) override;
 
 private:
 

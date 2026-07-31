@@ -1,35 +1,18 @@
 #ifndef SCENEDOCUMENT_HPP
 #define SCENEDOCUMENT_HPP
 
-#include <QGraphicsScene>
+#include <QObject>
 #include <QMap>
-#include "core/UiElement.hpp"
-#include "core/AssetContext.hpp"
-#include "components/TransformComponent.hpp"
-#include "components/ImageComponent.hpp"
-#include "components/TextComponent.hpp"
-#include "components/ButtonComponent.hpp"
-#include "components/StackLayoutComponent.hpp"
-#include "components/GridLayoutComponent.hpp"
-#include "components/ScrollBoxComponent.hpp"
-#include "components/PanelComponent.hpp"
-#include "components/ProgressBarComponent.hpp"
-#include "components/ToggleComponent.hpp"
-#include "components/DropdownComponent.hpp"
-#include "components/TextInputComponent.hpp"
-#include "components/IconComponent.hpp"
-#include "components/SpriteComponent.hpp"
-#include "components/TooltipComponent.hpp"
-#include "components/ModalComponent.hpp"
-#include "components/TabContainerComponent.hpp"
-#include "components/RadialMenuComponent.hpp"
-#include "components/MinimapComponent.hpp"
-#include "components/DragSlotComponent.hpp"
-#include "components/ListRepeaterComponent.hpp"
-#include "components/SlotComponent.hpp"
-#include "scene/SceneElementItem.hpp"
+#include <QList>
+#include <QString>
+#include <QByteArray>
+#include <QUuid>
+#include <QJsonObject>
 
+class QGraphicsScene;
 class QGraphicsRectItem;
+class UiElement;
+class SceneElementItem;
 
 class SceneDocument : public QObject
 {
@@ -38,30 +21,18 @@ class SceneDocument : public QObject
 public:
 
     explicit SceneDocument(QObject* parent = nullptr);
+    ~SceneDocument() override;
 
-    UiElement* GetRoot() const noexcept
-    {
-        return root;
-    }
+    UiElement* GetRoot() const noexcept;
 
-    QGraphicsScene* GetScene() const noexcept
-    {
-        return scene;
-    }
+    QGraphicsScene* GetScene() const noexcept;
 
     // Directory that contains this scene's scene.json. All imagePath/fontPath/
     // iconPath values are relative to it. Setting it mirrors into AssetContext
     // so components can resolve relative paths for preview.
-    QString GetBaseDir() const noexcept
-    {
-        return m_baseDir;
-    }
+    QString GetBaseDir() const noexcept;
 
-    void SetBaseDir(const QString& dir)
-    {
-        m_baseDir = dir;
-        AssetContext::SetBaseDir(dir);
-    }
+    void SetBaseDir(const QString& dir);
 
     UiElement* CreateImageElement(const QString& name, UiElement* parent = nullptr);
     UiElement* CreateTextElement(const QString& name, UiElement* parent = nullptr);
@@ -89,10 +60,7 @@ public:
     UiElement* CreateElementFromJson(const QJsonObject& obj, UiElement* parent, bool preserveIds = false);
     void DeleteElement(UiElement* e);
 
-    SceneElementItem* GetItem(UiElement* e) const
-    {
-        return items.value(e, nullptr);
-    }
+    SceneElementItem* GetItem(UiElement* e) const;
 
     QByteArray ExportJson() const;
     bool LoadJson(const QByteArray& data);
@@ -124,6 +92,9 @@ private:
     SceneElementItem* CreateItemFor(UiElement* e);
     void UpdateZValues(UiElement* parent);
 
+    void WireRootConnections();
+    void RemoveElementInternal(UiElement* e);
+
     void EnsureSlots(UiElement* master, const QString& masterKind, int desiredCount, const QString& nameFormat);
     void WireSlotReconciliation(UiElement* master);
 
@@ -133,6 +104,8 @@ private:
     QMap<UiElement*, SceneElementItem*> items;
     QString m_baseDir;
     bool m_syncingSelection = false;
+    QMetaObject::Connection m_sceneRectConn;
+    QMetaObject::Connection m_rootStructureConn;
 };
 
 #endif

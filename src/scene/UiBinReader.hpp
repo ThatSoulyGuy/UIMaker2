@@ -6,7 +6,7 @@
 
 class UiElement;
 
-// Decodes a .uibin v2 container back into a UiElement tree. Used for
+// Decodes a .uibin v4 container back into a UiElement tree. Used for
 // round-trip validation (the editor authors from JSON; this proves the binary
 // container is self-consistent and re-readable).
 //

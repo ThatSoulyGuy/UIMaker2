@@ -6,14 +6,16 @@
 #include <QUndoStack>
 #include <QToolBar>
 #include <QActionGroup>
-#include "scene/SceneDocument.hpp"
 #include "scene/TransformDelta.hpp"
-#include "ui/EntityTreeModel.hpp"
-#include "ui/PropertyEditorPanel.hpp"
 
 class ViewportWidget;
+class UiElement;
+class SceneDocument;
+class EntityTreeModel;
+class PropertyEditorPanel;
 
 QT_BEGIN_NAMESPACE
+class QGraphicsScene;
 namespace Ui
 {
     class UIMaker2;
@@ -29,13 +31,6 @@ public:
     MainWindow(QWidget* = nullptr);
     ~MainWindow();
 
-    void ApplySceneJson(const QByteArray& bytes);
-
-    static MainWindow* Instance() { return s_instance; }
-
-private:
-    static MainWindow* s_instance;
-
 private slots:
 
     void onTransformCompleted(const QList<TransformDelta>& deltas, const QString& actionName);
@@ -48,6 +43,7 @@ private:
     void ConnectActions();
     void WireHierarchySignals();
     void AttachScene(QGraphicsScene* scene);
+    void FinishAddElement(UiElement* e, const QString& name);
 
     UiElement* CurrentElement() const;
     QList<UiElement*> SelectedElements() const;
@@ -72,7 +68,6 @@ private:
     QToolBar* transformToolbar = nullptr;
     QActionGroup* toolActionGroup = nullptr;
 
-    QMetaObject::Connection sceneRectChangedConnection;
     QMetaObject::Connection sceneSelectionConnection;
 
     QUndoStack* undoStack = nullptr;

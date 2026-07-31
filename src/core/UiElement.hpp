@@ -5,10 +5,10 @@
 #include <QString>
 #include <QUuid>
 #include <QJsonObject>
-#include <QJsonArray>
 #include <vector>
+#include <utility>
 
-#include "core/Component.hpp"
+class Component;
 
 class UiElement : public QObject
 {
@@ -17,47 +17,17 @@ class UiElement : public QObject
 
 public:
 
-    explicit UiElement(const QString& name, UiElement* parent = nullptr) : QObject(parent), id(QUuid::createUuid()), name(name.isEmpty() ? QStringLiteral("Element") : name) { }
+    explicit UiElement(const QString& name, UiElement* parent = nullptr);
 
-    QUuid GetId() const noexcept
-    {
-        return id;
-    }
+    QUuid GetId() const noexcept;
 
-    void SetId(const QUuid& value)
-    {
-        if (!value.isNull())
-            id = value;
-    }
+    void SetId(const QUuid& value);
 
-    QString GetName() const noexcept
-    {
-        return name;
-    }
+    QString GetName() const noexcept;
 
-    void SetName(const QString& value)
-    {
-        if (value.isEmpty() || name == value)
-            return;
+    void SetName(const QString& value);
 
-        name = value;
-
-        emit NameChanged(name);
-        emit StructureChanged();
-    }
-
-    std::vector<Component*> GetComponents() const
-    {
-        std::vector<Component*> out;
-
-        for (QObject* child : children())
-        {
-            if (auto* comp = qobject_cast<Component*>(child))
-                out.push_back(comp);
-        }
-
-        return out;
-    }
+    std::vector<Component*> GetComponents() const;
 
     template <typename T> T* GetComponent() const
     {
@@ -70,27 +40,9 @@ public:
         return nullptr;
     }
 
-    bool IsSlot() const
-    {
-        for (auto* c : GetComponents())
-        {
-            if (c->GetTypeName() == QLatin1String("Slot"))
-                return true;
-        }
+    bool IsSlot() const;
 
-        return false;
-    }
-
-    int GetSlotIndex() const
-    {
-        for (auto* c : GetComponents())
-        {
-            if (c->GetTypeName() == QLatin1String("Slot"))
-                return c->property("slotIndex").toInt();
-        }
-
-        return -1;
-    }
+    int GetSlotIndex() const;
 
     template <typename T, typename... Args> T* AddComponent(Args&&... args)
     {
@@ -104,104 +56,15 @@ public:
         return c;
     }
 
-    UiElement* AddChild(const QString& childName)
-    {
-        auto* e = new UiElement(childName, this);
+    UiElement* AddChild(const QString& childName);
 
-        emit StructureChanged();
+    // Move this element under newParent. insertPos is the desired FINAL index
+    // among newParent's child *elements* (components are not counted); -1 or
+    // out-of-range appends. Returns false if the move is rejected (null
+    // target, self, or a descendant of self).
+    bool ReparentTo(UiElement* newParent, int insertPos = -1);
 
-        return e;
-    }
-
-    void ReparentTo(UiElement* newParent, int insertPos = -1)
-    {
-        if (newParent == nullptr || newParent == this)
-            return;
-
-        for (auto* p = qobject_cast<UiElement*>(newParent); p != nullptr; p = qobject_cast<UiElement*>(p->parent()))
-        {
-            if (p == this)
-                return;
-        }
-
-        UiElement* oldParent = qobject_cast<UiElement*>(parent());
-
-        if (oldParent == newParent)
-        {
-            QObjectList& siblings = const_cast<QObjectList&>(newParent->children());
-            int currentIndex = siblings.indexOf(this);
-
-            if (insertPos < 0)
-                insertPos = siblings.size() - 1;
-
-            if (insertPos > currentIndex)
-                --insertPos;
-
-            if (insertPos < 0)
-                insertPos = 0;
-
-            if (insertPos >= siblings.size())
-                insertPos = siblings.size() - 1;
-
-            if (currentIndex != insertPos)
-            {
-                siblings.move(currentIndex, insertPos);
-                emit StructureChanged();
-            }
-
-            return;
-        }
-
-        setParent(newParent);
-
-        if (insertPos >= 0)
-        {
-            QObjectList& siblings = const_cast<QObjectList&>(newParent->children());
-            int currentIndex = siblings.indexOf(this);
-
-            if (insertPos >= siblings.size())
-                insertPos = siblings.size() - 1;
-
-            if (currentIndex != insertPos)
-                siblings.move(currentIndex, insertPos);
-        }
-
-        emit StructureChanged();
-    }
-
-    void ToJson(QJsonObject& out) const
-    {
-        out["id"] = id.toString(QUuid::WithoutBraces);
-        out["name"] = name;
-
-        QJsonArray comps;
-
-        for (auto* comp : GetComponents())
-        {
-            QJsonObject c;
-
-            comp->ToJson(c);
-            comps.push_back(c);
-        }
-
-        out["components"] = comps;
-
-        QJsonArray kids;
-
-        for (QObject* c : children())
-        {
-            if (auto* e = qobject_cast<UiElement*>(c))
-            {
-                QJsonObject child;
-
-                e->ToJson(child);
-
-                kids.push_back(child);
-            }
-        }
-
-        out["children"] = kids;
-    }
+    void ToJson(QJsonObject& out) const;
 
 signals:
 

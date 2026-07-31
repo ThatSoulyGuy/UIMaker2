@@ -3,16 +3,16 @@
 
 #include <QObject>
 #include <QHash>
-#include <QAction>
 #include <QActionGroup>
 #include <QGraphicsView>
 
-#include "tools/Tool.hpp"
-#include "gizmos/GizmoManager.hpp"
 #include "input/InputHandler.hpp"
-#include "input/PanZoomHandler.hpp"
-#include "input/TransformInputHandler.hpp"
 #include "input/EditorContext.hpp"
+
+class Tool;
+class GizmoManager;
+class PanZoomHandler;
+class TransformInputHandler;
 
 class ToolManager : public QObject
 {
@@ -20,154 +20,35 @@ class ToolManager : public QObject
 
 public:
 
-    explicit ToolManager(QObject* parent = nullptr)
-        : QObject(parent)
-        , m_gizmoManager(new GizmoManager(this))
-        , m_panZoomHandler(new PanZoomHandler(this))
-        , m_transformHandler(new TransformInputHandler(m_gizmoManager, this))
-    {
-        // Create default tools from registry
-        for (const QString& id : Tool::GetRegisteredIds())
-        {
-            if (Tool* tool = Tool::Create(id, this))
-            {
-                RegisterTool(tool);
-            }
-        }
-
-        // Connect transform handler signals
-        connect(m_transformHandler, &TransformInputHandler::TransformStarted, this, &ToolManager::onTransformStarted);
-        connect(m_transformHandler, &TransformInputHandler::TransformEnded, this, &ToolManager::onTransformEnded);
-    }
+    explicit ToolManager(QObject* parent = nullptr);
 
     ~ToolManager() = default;
 
-    void RegisterTool(Tool* tool)
-    {
-        if (!tool)
-            return;
+    void RegisterTool(Tool* tool);
 
-        tool->setParent(this);
-        m_tools.insert(tool->GetId(), tool);
-    }
+    void SetActiveTool(const QString& toolId);
 
-    void SetActiveTool(const QString& toolId)
-    {
-        Tool* newTool = m_tools.value(toolId, nullptr);
+    Tool* GetActiveTool() const noexcept;
 
-        if (!newTool || newTool == m_activeTool)
-            return;
+    Tool* GetTool(const QString& id) const;
 
-        if (m_activeTool)
-        {
-            m_activeTool->Deactivate();
-        }
+    QList<Tool*> GetAllTools() const;
 
-        m_activeTool = newTool;
-        m_activeTool->Activate();
+    GizmoManager* GetGizmoManager() const noexcept;
 
-        // Update gizmo manager to show the corresponding gizmo
-        m_gizmoManager->SetActiveGizmoId(m_activeTool->GetGizmoId());
+    InputResult HandleInput(const MousePressEvent& event, EditorContext& ctx);
 
-        emit ActiveToolChanged(m_activeTool);
-    }
+    InputResult HandleInput(const MouseMoveEvent& event, EditorContext& ctx);
 
-    Tool* GetActiveTool() const noexcept
-    {
-        return m_activeTool;
-    }
+    InputResult HandleInput(const MouseReleaseEvent& event, EditorContext& ctx);
 
-    Tool* GetTool(const QString& id) const
-    {
-        return m_tools.value(id, nullptr);
-    }
+    InputResult HandleInput(const WheelEvent& event, EditorContext& ctx);
 
-    QList<Tool*> GetAllTools() const
-    {
-        return m_tools.values();
-    }
+    bool IsTransforming() const;
 
-    GizmoManager* GetGizmoManager() const noexcept
-    {
-        return m_gizmoManager;
-    }
+    bool IsPanning() const;
 
-    InputResult HandleInput(const MousePressEvent& event, EditorContext& ctx)
-    {
-        // Pan/zoom has highest priority
-        InputResult result = m_panZoomHandler->HandlePress(event, ctx);
-
-        if (result.consumed)
-            return result;
-
-        // Transform handling
-        return m_transformHandler->HandlePress(event, ctx);
-    }
-
-    InputResult HandleInput(const MouseMoveEvent& event, EditorContext& ctx)
-    {
-        // Check pan/zoom first
-        InputResult result = m_panZoomHandler->HandleMove(event, ctx);
-
-        if (result.consumed)
-            return result;
-
-        // Transform handling
-        return m_transformHandler->HandleMove(event, ctx);
-    }
-
-    InputResult HandleInput(const MouseReleaseEvent& event, EditorContext& ctx)
-    {
-        // Check pan/zoom first
-        InputResult result = m_panZoomHandler->HandleRelease(event, ctx);
-
-        if (result.consumed)
-            return result;
-
-        // Transform handling
-        return m_transformHandler->HandleRelease(event, ctx);
-    }
-
-    InputResult HandleInput(const WheelEvent& event, EditorContext& ctx)
-    {
-        return m_panZoomHandler->HandleWheel(event, ctx);
-    }
-
-    bool IsTransforming() const
-    {
-        return m_transformHandler->IsTransforming();
-    }
-
-    bool IsPanning() const
-    {
-        return m_panZoomHandler->IsPanning();
-    }
-
-    QActionGroup* CreateToolActions(QObject* parent)
-    {
-        auto* group = new QActionGroup(parent);
-        group->setExclusive(true);
-
-        for (Tool* tool : m_tools.values())
-        {
-            QAction* action = new QAction(tool->GetDisplayName(), group);
-            action->setCheckable(true);
-            action->setShortcut(tool->GetShortcut());
-            action->setIcon(tool->GetIcon());
-            action->setData(tool->GetId());
-
-            if (tool == m_activeTool)
-                action->setChecked(true);
-
-            connect(action, &QAction::triggered, this, [this, tool]() {
-                SetActiveTool(tool->GetId());
-            });
-
-            group->addAction(action);
-        }
-
-        return group;
-    }
+    QActionGroup* CreateToolActions(QObject* parent);
 
 signals:
 
@@ -178,15 +59,9 @@ signals:
 
 private slots:
 
-    void onTransformStarted()
-    {
-        emit TransformStarted();
-    }
+    void onTransformStarted();
 
-    void onTransformEnded(const QList<TransformDelta>& deltas, const QString& actionName)
-    {
-        emit TransformEnded(deltas, actionName);
-    }
+    void onTransformEnded(const QList<TransformDelta>& deltas, const QString& actionName);
 
 private:
 

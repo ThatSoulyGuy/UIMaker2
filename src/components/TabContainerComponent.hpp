@@ -24,121 +24,38 @@ class TabContainerComponent : public Component
 
 public:
 
-    explicit TabContainerComponent(QObject* parent = nullptr)
-        : Component(parent)
-        , m_tabNames("Tab 1,Tab 2,Tab 3")
-        , m_activeTab(0)
-        , m_tabHeight(32)
-        , m_activeColor(QColor(60, 60, 68))
-        , m_inactiveColor(QColor(40, 40, 45))
-        , m_textColor(Qt::white)
-        , m_backgroundColor(QColor(50, 50, 55)) { }
+    explicit TabContainerComponent(QObject* parent = nullptr);
 
-    QString GetTypeName() const override { return QStringLiteral("TabContainer"); }
+    QString GetTypeName() const override;
 
     void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override;
 
-    bool Paint(QPainter* painter, const QRectF& rect, bool selected) override
-    {
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing, true);
+    bool Paint(QPainter* painter, const QRectF& rect, bool selected) override;
 
-        QStringList tabs = m_tabNames.split(',', Qt::SkipEmptyParts);
-        int tabCount = std::max(1, static_cast<int>(tabs.size()));
-        double tabW = rect.width() / tabCount;
+    QString GetTabNames() const noexcept;
+    void SetTabNames(const QString& v);
 
-        // Draw tab bar
-        QFont font;
-        font.setPixelSize(14);
-        painter->setFont(font);
+    int GetActiveTab() const noexcept;
+    void SetActiveTab(int v);
 
-        for (int i = 0; i < tabCount; ++i)
-        {
-            QRectF tabRect(rect.x() + i * tabW, rect.y(), tabW, m_tabHeight);
-            bool active = (i == m_activeTab);
+    int GetTabHeight() const noexcept;
+    void SetTabHeight(int v);
 
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(active ? m_activeColor : m_inactiveColor);
-            painter->drawRect(tabRect);
+    QColor GetActiveColor() const noexcept;
+    void SetActiveColor(const QColor& v);
 
-            // Bottom border for inactive tabs
-            if (!active)
-            {
-                QPen sep(QColor(70, 70, 80), 1);
-                sep.setCosmetic(true);
-                painter->setPen(sep);
-                painter->drawLine(tabRect.bottomLeft(), tabRect.bottomRight());
-            }
+    QColor GetInactiveColor() const noexcept;
+    void SetInactiveColor(const QColor& v);
 
-            painter->setPen(m_textColor);
-            QString label = (i < tabs.size()) ? tabs[i].trimmed() : QString("Tab %1").arg(i + 1);
-            painter->drawText(tabRect, Qt::AlignCenter, label);
-        }
+    QColor GetTextColor() const noexcept;
+    void SetTextColor(const QColor& v);
 
-        // Draw content area
-        QRectF contentRect(rect.x(), rect.y() + m_tabHeight, rect.width(), rect.height() - m_tabHeight);
-        QPen borderPen(QColor(70, 70, 80), 1);
-        borderPen.setCosmetic(true);
-        painter->setPen(borderPen);
-        painter->setBrush(m_backgroundColor);
-        painter->drawRect(contentRect);
+    QColor GetBackgroundColor() const noexcept;
+    void SetBackgroundColor(const QColor& v);
 
-        if (selected)
-        {
-            QPen selPen(QColor(0, 180, 255), 2, Qt::DashLine);
-            selPen.setCosmetic(true);
-            painter->setPen(selPen);
-            painter->setBrush(Qt::NoBrush);
-            painter->drawRect(rect);
-        }
+    void ToJson(QJsonObject& out) const override;
 
-        painter->restore();
-        return true;
-    }
-
-    QString GetTabNames() const noexcept { return m_tabNames; }
-    void SetTabNames(const QString& v) { if (m_tabNames == v) return; m_tabNames = v; NotifyChanged(); }
-
-    int GetActiveTab() const noexcept { return m_activeTab; }
-    void SetActiveTab(int v) { if (m_activeTab == v) return; m_activeTab = v; NotifyChanged(); }
-
-    int GetTabHeight() const noexcept { return m_tabHeight; }
-    void SetTabHeight(int v) { if (m_tabHeight == v) return; m_tabHeight = v; NotifyChanged(); }
-
-    QColor GetActiveColor() const noexcept { return m_activeColor; }
-    void SetActiveColor(const QColor& v) { if (m_activeColor == v) return; m_activeColor = v; NotifyChanged(); }
-
-    QColor GetInactiveColor() const noexcept { return m_inactiveColor; }
-    void SetInactiveColor(const QColor& v) { if (m_inactiveColor == v) return; m_inactiveColor = v; NotifyChanged(); }
-
-    QColor GetTextColor() const noexcept { return m_textColor; }
-    void SetTextColor(const QColor& v) { if (m_textColor == v) return; m_textColor = v; NotifyChanged(); }
-
-    QColor GetBackgroundColor() const noexcept { return m_backgroundColor; }
-    void SetBackgroundColor(const QColor& v) { if (m_backgroundColor == v) return; m_backgroundColor = v; NotifyChanged(); }
-
-    void ToJson(QJsonObject& out) const override
-    {
-        out["kind"] = "TabContainer";
-        out["tabNames"] = m_tabNames;
-        out["activeTab"] = m_activeTab;
-        out["tabHeight"] = m_tabHeight;
-        out["activeColor"] = m_activeColor.name(QColor::HexArgb);
-        out["inactiveColor"] = m_inactiveColor.name(QColor::HexArgb);
-        out["textColor"] = m_textColor.name(QColor::HexArgb);
-        out["backgroundColor"] = m_backgroundColor.name(QColor::HexArgb);
-    }
-
-    void FromJson(const QJsonObject& in) override
-    {
-        SetTabNames(in["tabNames"].toString("Tab 1,Tab 2,Tab 3"));
-        SetActiveTab(in["activeTab"].toInt(0));
-        SetTabHeight(in["tabHeight"].toInt(32));
-        SetActiveColor(QColor(in["activeColor"].toString("#FF3C3C44")));
-        SetInactiveColor(QColor(in["inactiveColor"].toString("#FF28282D")));
-        SetTextColor(QColor(in["textColor"].toString("#FFFFFFFF")));
-        SetBackgroundColor(QColor(in["backgroundColor"].toString("#FF323237")));
-    }
+    void FromJson(const QJsonObject& in) override;
 
 private:
 

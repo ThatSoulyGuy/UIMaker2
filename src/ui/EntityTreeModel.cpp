@@ -1,5 +1,7 @@
 #include "ui/EntityTreeModel.hpp"
+#include "core/UiElement.hpp"
 #include <QByteArray>
+#include <functional>
 
 static UiElement* ElementAtRow(UiElement* parent, int row)
 {
@@ -117,6 +119,11 @@ int EntityTreeModel::rowCount(const QModelIndex& parentIndex) const
     return count;
 }
 
+int EntityTreeModel::columnCount(const QModelIndex&) const
+{
+    return 1;
+}
+
 QVariant EntityTreeModel::data(const QModelIndex& index, int role) const
 {
     if (!index.isValid())
@@ -161,6 +168,11 @@ Qt::ItemFlags EntityTreeModel::flags(const QModelIndex& index) const
     }
 
     return f;
+}
+
+Qt::DropActions EntityTreeModel::supportedDropActions() const
+{
+    return Qt::MoveAction;
 }
 
 QStringList EntityTreeModel::mimeTypes() const
@@ -217,15 +229,40 @@ bool EntityTreeModel::dropMimeData(const QMimeData* data, Qt::DropAction action,
     if (!moving || moving == parentElement)
         return false;
 
+    UiElement* oldParent = qobject_cast<UiElement*>(moving->parent());
+    const int oldRow = RowOfElement(moving);
+
     int insertRow = row < 0 ? rowCount(parentIndex) : row;
 
+    // The view supplies the drop row in pre-removal terms; ReparentTo takes
+    // the final index, so a same-parent move past the element's own slot
+    // shifts down by one.
+    if (oldParent == parentElement && oldRow >= 0 && insertRow > oldRow)
+        --insertRow;
+
     beginResetModel();
-    moving->ReparentTo(parentElement, insertRow);
+    const bool moved = moving->ReparentTo(parentElement, insertRow);
     endResetModel();
 
     ConnectNameSignals(root);
 
     emit HierarchyChanged();
+
+    if (moved)
+    {
+        const int newRow = RowOfElement(moving);
+
+        // A drop back onto the element's own position changes nothing; don't
+        // record a do-nothing undo step for it.
+        if (oldParent != parentElement || newRow != oldRow)
+        {
+            emit ElementReparented(moving->GetId(),
+                                   (oldParent && oldParent != root) ? oldParent->GetId() : QUuid(),
+                                   oldRow,
+                                   (parentElement && parentElement != root) ? parentElement->GetId() : QUuid(),
+                                   newRow);
+        }
+    }
 
     return true;
 }
