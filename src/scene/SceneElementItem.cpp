@@ -101,6 +101,8 @@ void SceneElementItem::RefreshFromComponents()
 
     if (auto* p = parentItem())
         parentRect = p->boundingRect();
+    else if (!screenRect.isNull())
+        parentRect = screenRect;
     else if (scene())
         parentRect = scene()->sceneRect();
 
@@ -209,6 +211,11 @@ void SceneElementItem::setRotationFromComponent(double deg)
     ignoreRotationFeedback = false;
 }
 
+void SceneElementItem::SetScreenRect(const QRectF& r)
+{
+    screenRect = r;
+}
+
 QVariant SceneElementItem::itemChange(GraphicsItemChange change, const QVariant& value)
 {
     if (change == ItemPositionHasChanged)
@@ -221,6 +228,8 @@ QVariant SceneElementItem::itemChange(GraphicsItemChange change, const QVariant&
 
                 if (auto* p = parentItem())
                     parentRect = p->boundingRect();
+                else if (!screenRect.isNull())
+                    parentRect = screenRect;
                 else if (scene())
                     parentRect = scene()->sceneRect();
 

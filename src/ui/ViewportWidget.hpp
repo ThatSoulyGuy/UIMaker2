@@ -6,10 +6,12 @@
 #include "scene/TransformDelta.hpp"
 
 class QGraphicsItem;
+class QPainter;
 class QPaintEvent;
 class QMouseEvent;
 class QWheelEvent;
 class QKeyEvent;
+class QRectF;
 
 class ToolManager;
 class RenderPipeline;
@@ -40,6 +42,10 @@ signals:
     void TransformCompleted(const QList<TransformDelta>& deltas, const QString& actionName);
 
 protected:
+
+    // Paints the dot grid as constant-size vector dots (crisp at every zoom)
+    // instead of a scaled pixmap brush.
+    void drawBackground(QPainter* painter, const QRectF& rect) override;
 
     void paintEvent(QPaintEvent* event) override;
 

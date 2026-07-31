@@ -24,6 +24,12 @@ public:
     void setPosFromComponent(const QPointF& p);
     void setRotationFromComponent(double deg);
 
+    // The rect a TOP-LEVEL element anchors against (the design canvas / screen).
+    // Distinct from the scene rect, which is a large pasteboard for panning;
+    // anchoring against the scene rect would offset every top-level element by
+    // the pasteboard margin.
+    void SetScreenRect(const QRectF& r);
+
 protected:
 
     QVariant itemChange(GraphicsItemChange change, const QVariant& value) override;
@@ -40,6 +46,7 @@ private:
 
     UiElement* element;
     QRectF localRect;
+    QRectF screenRect;
     bool pendingRefresh = false;
     bool inLayoutRefresh = false;
     bool inDownwardCascade = false;

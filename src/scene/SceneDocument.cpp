@@ -47,47 +47,37 @@
 #include "components/ListRepeaterComponent.hpp"
 #include "components/SlotComponent.hpp"
 
-SceneDocument::SceneDocument(QObject* parent) : QObject(parent), root(new UiElement("Root")), scene(new QGraphicsScene(this)), rootRect(nullptr)
+SceneDocument::SceneDocument(QObject* parent) : QObject(parent), root(new UiElement("Root")), scene(new QGraphicsScene(this)), rootRect(nullptr), m_canvasRect(0.0, 0.0, 1920.0, 1080.0)
 {
-    scene->setSceneRect(QRectF(0.0, 0.0, 1920.0, 1080.0));
+    // The scene rect is a large pasteboard surrounding the design canvas, so
+    // drag-panning always has somewhere to go - even zoomed far out, where a
+    // scene rect equal to the canvas would collapse the scroll range to zero.
+    const qreal mx = m_canvasRect.width() * 10.0;
+    const qreal my = m_canvasRect.height() * 10.0;
+    scene->setSceneRect(m_canvasRect.adjusted(-mx, -my, mx, my));
 
     QObject::connect(scene, &QGraphicsScene::selectionChanged, this, &SceneDocument::OnSceneSelectionChanged);
 
-    {
-        const int tileSize = 32;
-        const int dotSpacing = 16;
-        const qreal dotRadius = 1.2;
-
-        QPixmap tile(tileSize, tileSize);
-        tile.fill(QColor(35, 35, 38));
-
-        QPainter painter(&tile);
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(QColor(110, 110, 115));
-
-        for (int y = 0; y < tileSize; y += dotSpacing)
-        {
-            for (int x = 0; x < tileSize; x += dotSpacing)
-            {
-                painter.drawEllipse(QPointF(x + 0.5, y + 0.5), dotRadius, dotRadius);
-            }
-        }
-        painter.end();
-
-        scene->setBackgroundBrush(QBrush(tile));
-    }
+    // Solid canvas background. The dot grid is painted by ViewportWidget in
+    // drawBackground() as constant-size vector dots so it stays crisp at every
+    // zoom level; a tiled pixmap brush scales with the view transform and blurs.
+    scene->setBackgroundBrush(QColor(35, 35, 38));
 
     {
         QPen borderPen(QColor(220, 220, 220));
         borderPen.setCosmetic(true);
         borderPen.setWidth(1);
 
-        rootRect = scene->addRect(scene->sceneRect(), borderPen, Qt::NoBrush);
+        rootRect = scene->addRect(m_canvasRect, borderPen, Qt::NoBrush);
         rootRect->setZValue(-1);
     }
 
     WireRootConnections();
+}
+
+QRectF SceneDocument::GetCanvasRect() const noexcept
+{
+    return m_canvasRect;
 }
 
 SceneDocument::~SceneDocument()
@@ -99,21 +89,17 @@ SceneDocument::~SceneDocument()
 // replaced), so disconnect the previous ones first to avoid stacking.
 void SceneDocument::WireRootConnections()
 {
-    QObject::disconnect(m_sceneRectConn);
     QObject::disconnect(m_rootStructureConn);
 
-    m_sceneRectConn = QObject::connect(scene, &QGraphicsScene::sceneRectChanged, this, [this](const QRectF& r)
-    {
-        if (rootRect)
-            rootRect->setRect(r);
-    });
-
+    // rootRect is pinned to the fixed design canvas (GetCanvasRect), not the
+    // pasteboard scene rect, so it is no longer mirrored from sceneRectChanged.
     m_rootStructureConn = QObject::connect(root, &UiElement::StructureChanged, this, &SceneDocument::OnStructureChanged);
 }
 
 SceneElementItem* SceneDocument::CreateItemFor(UiElement* e)
 {
     auto* item = new SceneElementItem(e);
+    item->SetScreenRect(m_canvasRect);
 
     SceneElementItem* parentItem = nullptr;
     if (auto* parentElement = qobject_cast<UiElement*>(e->parent()))
@@ -504,7 +490,7 @@ bool SceneDocument::LoadJson(const QByteArray& data)
 
     borderPen.setCosmetic(true);
     borderPen.setWidth(1);
-    rootRect = scene->addRect(scene->sceneRect(), borderPen, Qt::NoBrush);
+    rootRect = scene->addRect(m_canvasRect, borderPen, Qt::NoBrush);
     rootRect->setZValue(-1);
 
     delete root;

@@ -11,8 +11,14 @@
 #include <QGridLayout>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QDir>
+#include <QSettings>
+#include <QMenu>
+#include <QMenuBar>
+#include <QInputDialog>
 #include <QItemSelection>
 #include <QSignalBlocker>
+#include "core/GridSnap.hpp"
 #include "core/UiElement.hpp"
 #include "core/Component.hpp"
 #include "components/TransformComponent.hpp"
@@ -418,13 +424,72 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::UIMake
     BuildHierarchyDock();
     BuildPropertyDock();
     BuildToolbar();
+    BuildViewMenu();
     ConnectActions();
 
-    UiElement* title = document->CreateTextElement("Title");
-    title->GetComponent<TransformComponent>()->SetPosition(QPointF(100.0, 80.0));
+    // Reopen the scene the user last had open; fall back to seeding demo
+    // content on a fresh install or if that file is missing/unreadable.
+    QSettings settings;
+    const QString lastFile = settings.value(QStringLiteral("io/lastFile")).toString();
 
-    UiElement* startButton = document->CreateButtonElement("StartButton");
-    startButton->GetComponent<TransformComponent>()->SetPosition(QPointF(100.0, 160.0));
+    if (lastFile.isEmpty() || !QFileInfo::exists(lastFile) || !OpenSceneFile(lastFile))
+    {
+        UiElement* title = document->CreateTextElement("Title");
+        title->GetComponent<TransformComponent>()->SetPosition(QPointF(100.0, 80.0));
+
+        UiElement* startButton = document->CreateButtonElement("StartButton");
+        startButton->GetComponent<TransformComponent>()->SetPosition(QPointF(100.0, 160.0));
+    }
+}
+
+bool MainWindow::OpenSceneFile(const QString& path)
+{
+    QFile file(path);
+
+    if (!file.open(QIODevice::ReadOnly))
+    {
+        QMessageBox::warning(this, "Load Failed", QString("Could not open file:\n%1").arg(file.errorString()));
+        return false;
+    }
+
+    const QByteArray json = file.readAll();
+    file.close();
+
+    SceneDocument* newDoc = new SceneDocument(this);
+
+    // The JSON file's directory is the project root; asset paths inside it
+    // are relative to here and resolved on demand (no JSON rewriting).
+    newDoc->SetBaseDir(QFileInfo(path).absolutePath());
+
+    if (!newDoc->LoadJson(json))
+    {
+        delete newDoc;
+        QMessageBox::warning(this, "Load Failed", "Invalid or corrupt scene JSON.");
+        return false;
+    }
+
+    // Undo commands hold raw pointers into the old document; drop them before
+    // it goes away or Ctrl+Z would dereference freed memory.
+    undoStack->clear();
+
+    delete document;
+    document = newDoc;
+
+    m_viewport->SetDocument(document);
+    AttachScene(document->GetScene());
+
+    delete hierarchyModel;
+    hierarchyModel = new EntityTreeModel(document->GetRoot(), this);
+
+    delete hierarchySelection;
+    hierarchySelection = new QItemSelectionModel(hierarchyModel, this);
+
+    hierarchyView->setModel(hierarchyModel);
+    hierarchyView->setSelectionModel(hierarchySelection);
+    WireHierarchySignals();
+    propertyPanel->SetTarget(document->GetRoot());
+
+    return true;
 }
 
 MainWindow::~MainWindow()
@@ -594,6 +659,134 @@ void MainWindow::FinishAddElement(UiElement* e, const QString& name)
     propertyPanel->SetTarget(e);
 }
 
+void MainWindow::BuildViewMenu()
+{
+    // Restore persisted snapping state into the global GridSnap before building
+    // the menu, so the checkmarks reflect it.
+    QSettings settings;
+    GridSnap::SetDivisions(settings.value(QStringLiteral("snap/divX"), 16).toInt(),
+                           settings.value(QStringLiteral("snap/divY"), 16).toInt());
+    GridSnap::SetEnabled(settings.value(QStringLiteral("snap/enabled"), false).toBool());
+
+    QMenu* viewMenu = menuBar()->addMenu("View");
+    QMenu* snapMenu = viewMenu->addMenu("Snapping");
+
+    m_snapGroup = new QActionGroup(this);
+    m_snapGroup->setExclusive(true);
+
+    // Each preset carries its per-axis division count in data() (0,0 = Off).
+    auto addPreset = [this, snapMenu](const QString& label, int dx, int dy)
+    {
+        QAction* a = snapMenu->addAction(label);
+        a->setCheckable(true);
+        a->setData(QPoint(dx, dy));
+        m_snapGroup->addAction(a);
+        m_snapPresetActions.append(a);
+
+        connect(a, &QAction::triggered, this, [this, dx, dy]()
+        {
+            if (dx <= 0 || dy <= 0)
+                GridSnap::SetEnabled(false);
+            else
+            {
+                GridSnap::SetDivisions(dx, dy);
+                GridSnap::SetEnabled(true);
+            }
+
+            SaveSnapSettings();
+            SyncSnapChecks();
+
+            if (m_viewport)
+                m_viewport->viewport()->update();
+        });
+    };
+
+    addPreset("Off", 0, 0);
+    snapMenu->addSeparator();
+    addPreset("4 x 4", 4, 4);
+    addPreset("8 x 8", 8, 8);
+    addPreset("16 x 16", 16, 16);
+    addPreset("32 x 32", 32, 32);
+    addPreset("64 x 64", 64, 64);
+    // Minecraft's GUI is laid out on a 320x240 base resolution (the minimum it
+    // scales its screen down to); snapping to that grid matches its UI pixels.
+    addPreset("Minecraft (320 x 240)", 320, 240);
+    snapMenu->addSeparator();
+
+    m_snapCustomAction = snapMenu->addAction("Custom...");
+    m_snapCustomAction->setCheckable(true);
+    m_snapGroup->addAction(m_snapCustomAction);
+
+    connect(m_snapCustomAction, &QAction::triggered, this, [this]()
+    {
+        bool ok = false;
+        const int n = QInputDialog::getInt(this, "Custom Grid",
+            "Number of divisions per axis:", qMax(1, GridSnap::DivisionsX()), 1, 4096, 1, &ok);
+
+        if (!ok)
+        {
+            // Cancelled: restore the checkmark to the real current state.
+            SyncSnapChecks();
+            return;
+        }
+
+        GridSnap::SetDivisions(n, n);
+        GridSnap::SetEnabled(true);
+        SaveSnapSettings();
+        SyncSnapChecks();
+
+        if (m_viewport)
+            m_viewport->viewport()->update();
+    });
+
+    SyncSnapChecks();
+}
+
+void MainWindow::SaveSnapSettings()
+{
+    QSettings settings;
+    settings.setValue(QStringLiteral("snap/enabled"), GridSnap::Enabled());
+    settings.setValue(QStringLiteral("snap/divX"), GridSnap::DivisionsX());
+    settings.setValue(QStringLiteral("snap/divY"), GridSnap::DivisionsY());
+}
+
+void MainWindow::SyncSnapChecks()
+{
+    const bool enabled = GridSnap::Enabled();
+    const QPoint current(GridSnap::DivisionsX(), GridSnap::DivisionsY());
+
+    QAction* match = nullptr;
+
+    for (QAction* a : m_snapPresetActions)
+    {
+        const QPoint d = a->data().toPoint();
+
+        if (d.x() <= 0 || d.y() <= 0)   // the Off entry
+        {
+            if (!enabled)
+                match = a;
+        }
+        else if (enabled && d == current)
+        {
+            match = a;
+        }
+    }
+
+    // Snapping on with no preset match -> it's a custom division count.
+    if (!match && enabled && m_snapCustomAction)
+    {
+        m_snapCustomAction->setText(QString("Custom (%1 x %2)...").arg(current.x()).arg(current.y()));
+        match = m_snapCustomAction;
+    }
+    else if (m_snapCustomAction)
+    {
+        m_snapCustomAction->setText("Custom...");
+    }
+
+    if (match)
+        match->setChecked(true);
+}
+
 void MainWindow::ConnectActions()
 {
     auto connectAddAction = [this](QAction* action, const QString& name, auto createFn)
@@ -653,7 +846,9 @@ void MainWindow::ConnectActions()
 
     connect(ui->ActionExport, &QAction::triggered, this, [this]()
     {
-        QString folder = QFileDialog::getExistingDirectory(this, "Export to Folder");
+        QSettings settings;
+        QString folder = QFileDialog::getExistingDirectory(this, "Export to Folder",
+            settings.value(QStringLiteral("io/lastDir")).toString());
 
         if (folder.isEmpty())
             return;
@@ -663,6 +858,8 @@ void MainWindow::ConnectActions()
             // The exported folder is now the project root: assets live there
             // and subsequent relative-path edits resolve against it.
             document->SetBaseDir(folder);
+            settings.setValue(QStringLiteral("io/lastDir"), folder);
+            settings.setValue(QStringLiteral("io/lastFile"), QDir(folder).filePath("scene.json"));
             QMessageBox::information(this, "Export", "Scene exported successfully.");
         }
         else
@@ -671,68 +868,36 @@ void MainWindow::ConnectActions()
 
     connect(ui->ActionBake, &QAction::triggered, this, [this]()
     {
-        QString path = QFileDialog::getSaveFileName(this, "Bake Scene", QString(), "UI Binary (*.uibin)");
+        QSettings settings;
+        QString path = QFileDialog::getSaveFileName(this, "Bake Scene",
+            settings.value(QStringLiteral("io/lastDir")).toString(), "UI Binary (*.uibin)");
 
         if (path.isEmpty())
             return;
 
         if (SceneExporter::BakeToUiBin(document, path))
+        {
+            settings.setValue(QStringLiteral("io/lastDir"), QFileInfo(path).absolutePath());
             QMessageBox::information(this, "Bake", "Scene baked to .uibin successfully.");
+        }
         else
             QMessageBox::warning(this, "Bake Failed", "Could not bake scene.");
     });
 
     connect(ui->ActionLoad, &QAction::triggered, this, [this]()
     {
-        QString path = QFileDialog::getOpenFileName(this, "Load Scene JSON", QString(), "JSON (*.json)");
+        QSettings settings;
+        QString path = QFileDialog::getOpenFileName(this, "Load Scene JSON",
+            settings.value(QStringLiteral("io/lastDir")).toString(), "JSON (*.json)");
 
         if (path.isEmpty())
             return;
 
-        QFile file(path);
-
-        if (!file.open(QIODevice::ReadOnly))
+        if (OpenSceneFile(path))
         {
-            QMessageBox::warning(this, "Load Failed", QString("Could not open file:\n%1").arg(file.errorString()));
-            return;
+            settings.setValue(QStringLiteral("io/lastDir"), QFileInfo(path).absolutePath());
+            settings.setValue(QStringLiteral("io/lastFile"), path);
         }
-
-        QByteArray json = file.readAll();
-        file.close();
-
-        SceneDocument* newDoc = new SceneDocument(this);
-
-        // The JSON file's directory is the project root; asset paths inside it
-        // are relative to here and resolved on demand (no JSON rewriting).
-        newDoc->SetBaseDir(QFileInfo(path).absolutePath());
-
-        if (!newDoc->LoadJson(json))
-        {
-            delete newDoc;
-            QMessageBox::warning(this, "Load Failed", "Invalid or corrupt scene JSON.");
-            return;
-        }
-
-        // Undo commands hold raw pointers into the old document; drop them
-        // before it goes away or Ctrl+Z would dereference freed memory.
-        undoStack->clear();
-
-        delete document;
-        document = newDoc;
-
-        m_viewport->SetDocument(document);
-        AttachScene(document->GetScene());
-
-        delete hierarchyModel;
-        hierarchyModel = new EntityTreeModel(document->GetRoot(), this);
-
-        delete hierarchySelection;
-        hierarchySelection = new QItemSelectionModel(hierarchyModel, this);
-
-        hierarchyView->setModel(hierarchyModel);
-        hierarchyView->setSelectionModel(hierarchySelection);
-        WireHierarchySignals();
-        propertyPanel->SetTarget(document->GetRoot());
     });
 
     ui->ActionCopy->setShortcut(QKeySequence::Copy);
@@ -813,11 +978,13 @@ void MainWindow::AttachScene(QGraphicsScene* scene)
         propertyPanel->SetTargets(selected);
     });
 
-    // Fit view once on initial attach (new document / file load)
-    QTimer::singleShot(0, this, [this, scene]()
+    // Fit the design canvas once on initial attach (new document / file load).
+    // Fitting the canvas rather than the large pasteboard scene rect keeps the
+    // 1920x1080 canvas framed instead of shrinking it to a speck.
+    QTimer::singleShot(0, this, [this]()
     {
-        if (!m_viewport->viewport()->size().isEmpty())
-            m_viewport->fitInView(scene->sceneRect(), Qt::KeepAspectRatio);
+        if (document && !m_viewport->viewport()->size().isEmpty())
+            m_viewport->fitInView(document->GetCanvasRect(), Qt::KeepAspectRatio);
     });
 }
 

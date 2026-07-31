@@ -3,6 +3,7 @@
 #include "scene/SceneDocument.hpp"
 #include "scene/SceneElementItem.hpp"
 #include "core/UiElement.hpp"
+#include "core/GridSnap.hpp"
 #include "components/TransformComponent.hpp"
 
 #include <cmath>
@@ -65,6 +66,7 @@ InputResult TransformInputHandler::HandlePress(const MousePressEvent& event, Edi
         s.xform = GetTransformComponent(item);
         s.startItemPos = item->pos();
         s.startSceneCenter = item->sceneBoundingRect().center();
+        s.startSceneRect = item->sceneBoundingRect();
         if (s.xform)
         {
             s.startPosition = s.xform->GetPosition();
@@ -120,7 +122,7 @@ InputResult TransformInputHandler::HandleMove(const MouseMoveEvent& event, Edito
 
     const QPointF sceneDelta = event.scenePos - m_startScenePos;
 
-    ApplyTransform(event.scenePos, sceneDelta);
+    ApplyTransform(event.scenePos, sceneDelta, ctx);
 
     emit TransformUpdated();
 
@@ -235,8 +237,45 @@ TransformComponent* TransformInputHandler::GetTransformComponent(SceneElementIte
     return element->GetComponent<TransformComponent>();
 }
 
-void TransformInputHandler::ApplyTransform(const QPointF& scenePos, const QPointF& sceneDelta)
+void TransformInputHandler::ApplyTransform(const QPointF& scenePos, const QPointF& sceneDelta, EditorContext& ctx)
 {
+    // Resolve the shared translation delta once (used by all three translate
+    // handles). The x-only / y-only handles zero the locked axis.
+    const bool isTranslate = m_activeHandleId.startsWith("translate");
+
+    QPointF translateDelta = sceneDelta;
+    if (m_activeHandleId == "translate_x")
+        translateDelta.setY(0.0);
+    else if (m_activeHandleId == "translate_y")
+        translateDelta.setX(0.0);
+
+    // Grid snapping: snap the reference (first) item's resulting position to
+    // the nearest grid intersection and reuse that same delta for the whole
+    // selection, so a group moves rigidly and snaps as one instead of each
+    // item snapping independently. Only the axes this handle actually moves are
+    // snapped. The snap is done in SCENE space (mapping through the item's
+    // parent) because item positions are parent-relative but the grid/canvas
+    // lives in scene coordinates - so a nested element still snaps to the
+    // on-screen grid, not to an offset copy of it.
+    if (isTranslate && GridSnap::Enabled() && ctx.document && !m_startStates.isEmpty()
+        && m_startStates.first().item)
+    {
+        const QRectF canvas = ctx.document->GetCanvasRect();
+        SceneElementItem* refItem = m_startStates.first().item;
+        QGraphicsItem* parentItem = refItem->parentItem();
+        const QPointF refStart = m_startStates.first().startItemPos;
+
+        const QPointF targetItemPos = refStart + translateDelta;
+        const QPointF targetScene = parentItem ? parentItem->mapToScene(targetItemPos) : targetItemPos;
+        const QPointF snappedScene = GridSnap::Snap(targetScene, canvas);
+        const QPointF snappedItemPos = parentItem ? parentItem->mapFromScene(snappedScene) : snappedScene;
+
+        if (m_activeHandleId != "translate_y")
+            translateDelta.setX(snappedItemPos.x() - refStart.x());
+        if (m_activeHandleId != "translate_x")
+            translateDelta.setY(snappedItemPos.y() - refStart.y());
+    }
+
     // For rotate, the per-item delta angle is identical across the group, so compute once.
     double deltaAngle = 0.0;
     double cosA = 1.0;
@@ -259,17 +298,9 @@ void TransformInputHandler::ApplyTransform(const QPointF& scenePos, const QPoint
         if (!s.item || !s.xform)
             continue;
 
-        if (m_activeHandleId == "translate_x")
+        if (isTranslate)
         {
-            s.item->setPos(s.startItemPos + QPointF(sceneDelta.x(), 0));
-        }
-        else if (m_activeHandleId == "translate_y")
-        {
-            s.item->setPos(s.startItemPos + QPointF(0, sceneDelta.y()));
-        }
-        else if (m_activeHandleId == "translate_xy")
-        {
-            s.item->setPos(s.startItemPos + sceneDelta);
+            s.item->setPos(s.startItemPos + translateDelta);
         }
         else if (m_activeHandleId == "rotate_ring")
         {
@@ -288,12 +319,12 @@ void TransformInputHandler::ApplyTransform(const QPointF& scenePos, const QPoint
         }
         else if (m_activeHandleId.startsWith("scale"))
         {
-            ApplyScale(s, scenePos, sceneDelta);
+            ApplyScale(s, scenePos, sceneDelta, ctx);
         }
     }
 }
 
-void TransformInputHandler::ApplyScale(const ItemStartState& s, const QPointF& scenePos, const QPointF& sceneDelta)
+void TransformInputHandler::ApplyScale(const ItemStartState& s, const QPointF& scenePos, const QPointF& sceneDelta, EditorContext& ctx)
 {
     if (!s.item || !s.xform)
         return;
@@ -358,6 +389,58 @@ void TransformInputHandler::ApplyScale(const ItemStartState& s, const QPointF& s
             const double factor = currentDist / startDist;
             if (!stretchX) newW = std::max(10.0, s.startScale.x() * factor);
             if (!stretchY) newH = std::max(10.0, s.startScale.y() * factor);
+        }
+    }
+
+    // Grid snapping: snap the MOVING edge to the nearest grid line. Which edge
+    // actually moves depends on the anchor, not just the handle: a RIGHT-anchored
+    // element pins its right edge (so the LEFT edge moves for either X handle), a
+    // BOTTOM-anchored element pins its bottom edge, and a LEFT/TOP (default)
+    // element moves the dragged edge. A CENTER-anchored axis scales about its
+    // centre - which doesn't map cleanly to an edge-on-a-line - so it is left
+    // unsnapped, as is uniform scaling (pinning both edges while preserving
+    // aspect is over-constrained). The fixed edge is read from the element's
+    // start scene rect.
+    if (GridSnap::Enabled() && ctx.document && m_activeHandleId != "scale_uniform")
+    {
+        const QRectF canvas = ctx.document->GetCanvasRect();
+        const QRectF sr = s.startSceneRect;
+        const QString& h = m_activeHandleId;
+        const auto a = s.xform->GetAnchors();
+
+        const bool rightSide  = h == "scale_right" || h == "scale_top_right" || h == "scale_bottom_right";
+        const bool leftSide   = h == "scale_left"  || h == "scale_top_left"  || h == "scale_bottom_left";
+        const bool bottomSide = h == "scale_bottom" || h == "scale_bottom_left" || h == "scale_bottom_right";
+        const bool topSide    = h == "scale_top"    || h == "scale_top_left"    || h == "scale_top_right";
+
+        if ((leftSide || rightSide) && !stretchX && !a.testFlag(Anchor::CENTER_X))
+        {
+            // RIGHT anchor pins the right edge, so the left edge is the one that
+            // moves regardless of handle; otherwise the dragged edge moves.
+            if (a.testFlag(Anchor::RIGHT) || leftSide)
+            {
+                const double edge = GridSnap::Snap(QPointF(sr.right() - newW, sr.center().y()), canvas).x();
+                newW = std::max(10.0, sr.right() - edge);
+            }
+            else
+            {
+                const double edge = GridSnap::Snap(QPointF(sr.left() + newW, sr.center().y()), canvas).x();
+                newW = std::max(10.0, edge - sr.left());
+            }
+        }
+
+        if ((topSide || bottomSide) && !stretchY && !a.testFlag(Anchor::CENTER_Y))
+        {
+            if (a.testFlag(Anchor::BOTTOM) || topSide)
+            {
+                const double edge = GridSnap::Snap(QPointF(sr.center().x(), sr.bottom() - newH), canvas).y();
+                newH = std::max(10.0, sr.bottom() - edge);
+            }
+            else
+            {
+                const double edge = GridSnap::Snap(QPointF(sr.center().x(), sr.top() + newH), canvas).y();
+                newH = std::max(10.0, edge - sr.top());
+            }
         }
     }
 

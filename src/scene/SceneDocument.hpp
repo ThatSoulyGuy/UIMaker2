@@ -7,6 +7,7 @@
 #include <QString>
 #include <QByteArray>
 #include <QUuid>
+#include <QRectF>
 #include <QJsonObject>
 
 class QGraphicsScene;
@@ -26,6 +27,11 @@ public:
     UiElement* GetRoot() const noexcept;
 
     QGraphicsScene* GetScene() const noexcept;
+
+    // The design canvas (the outlined 1920x1080 area). This is distinct from
+    // the scene rect, which is a much larger pasteboard so the view can always
+    // pan/scroll even when zoomed far out. "Fit to scene" frames this rect.
+    QRectF GetCanvasRect() const noexcept;
 
     // Directory that contains this scene's scene.json. All imagePath/fontPath/
     // iconPath values are relative to it. Setting it mirrors into AssetContext
@@ -101,6 +107,7 @@ private:
     UiElement* root;
     QGraphicsScene* scene;
     QGraphicsRectItem* rootRect;
+    QRectF m_canvasRect;
     QMap<UiElement*, SceneElementItem*> items;
     QString m_baseDir;
     bool m_syncingSelection = false;

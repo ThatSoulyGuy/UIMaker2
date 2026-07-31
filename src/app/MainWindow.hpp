@@ -6,6 +6,7 @@
 #include <QUndoStack>
 #include <QToolBar>
 #include <QActionGroup>
+#include <QList>
 #include "scene/TransformDelta.hpp"
 
 class ViewportWidget;
@@ -13,6 +14,7 @@ class UiElement;
 class SceneDocument;
 class EntityTreeModel;
 class PropertyEditorPanel;
+class QAction;
 
 QT_BEGIN_NAMESPACE
 class QGraphicsScene;
@@ -40,10 +42,21 @@ private:
     void BuildHierarchyDock();
     void BuildPropertyDock();
     void BuildToolbar();
+    void BuildViewMenu();
     void ConnectActions();
+
+    // Grid-snapping menu helpers: persist the current GridSnap state to
+    // QSettings, and set the checkmark on whichever menu item matches it.
+    void SaveSnapSettings();
+    void SyncSnapChecks();
     void WireHierarchySignals();
     void AttachScene(QGraphicsScene* scene);
     void FinishAddElement(UiElement* e, const QString& name);
+
+    // Load a scene .json, swapping it in as the active document and rewiring
+    // the tree/property/viewport. Returns false (and shows a warning) on a
+    // read or parse failure. Shared by File>Load and the reopen-on-startup path.
+    bool OpenSceneFile(const QString& path);
 
     UiElement* CurrentElement() const;
     QList<UiElement*> SelectedElements() const;
@@ -67,6 +80,13 @@ private:
 
     QToolBar* transformToolbar = nullptr;
     QActionGroup* toolActionGroup = nullptr;
+
+    // View>Snapping actions. Preset/off actions carry their divisions in
+    // QAction::data() as a QPoint (0,0 = Off); the custom action is tracked
+    // separately so SyncSnapChecks can relabel it.
+    QActionGroup* m_snapGroup = nullptr;
+    QList<QAction*> m_snapPresetActions;
+    QAction* m_snapCustomAction = nullptr;
 
     QMetaObject::Connection sceneSelectionConnection;
 

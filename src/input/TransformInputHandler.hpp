@@ -39,6 +39,7 @@ private:
         QPointF startItemPos;
         QPointF startPosition;
         QPointF startSceneCenter;
+        QRectF startSceneRect;
         double startRotation = 0.0;
         QPointF startScale;
     };
@@ -46,8 +47,8 @@ private:
     SceneElementItem* GetSelectedItem(EditorContext& ctx) const;
     TransformComponent* GetTransformComponent(SceneElementItem* item) const;
 
-    void ApplyTransform(const QPointF& scenePos, const QPointF& sceneDelta);
-    void ApplyScale(const ItemStartState& state, const QPointF& scenePos, const QPointF& sceneDelta);
+    void ApplyTransform(const QPointF& scenePos, const QPointF& sceneDelta, EditorContext& ctx);
+    void ApplyScale(const ItemStartState& state, const QPointF& scenePos, const QPointF& sceneDelta, EditorContext& ctx);
 
     GizmoManager* m_gizmoManager = nullptr;
 

@@ -7,6 +7,8 @@
 #include <QKeyEvent>
 #include <QGraphicsItem>
 #include <QGraphicsScene>
+#include <QColor>
+#include <cmath>
 
 #include "tools/ToolManager.hpp"
 #include "tools/Tool.hpp"
@@ -16,6 +18,7 @@
 #include "input/InputHandler.hpp"
 #include "input/InputEvents.hpp"
 #include "scene/SceneDocument.hpp"
+#include "core/GridSnap.hpp"
 
 ViewportWidget::ViewportWidget(QWidget* parent)
     : QGraphicsView(parent)
@@ -74,8 +77,97 @@ void ViewportWidget::FitToItem(QGraphicsItem* item)
 
 void ViewportWidget::FitToScene()
 {
-    if (scene())
-        fitInView(scene()->sceneRect(), Qt::KeepAspectRatio);
+    if (!scene())
+        return;
+
+    // Frame the design canvas, not the (much larger) pasteboard scene rect.
+    const QRectF target = m_document ? m_document->GetCanvasRect() : scene()->sceneRect();
+    fitInView(target, Qt::KeepAspectRatio);
+}
+
+void ViewportWidget::drawBackground(QPainter* painter, const QRectF& rect)
+{
+    // Solid fill from the scene's background brush.
+    QGraphicsView::drawBackground(painter, rect);
+
+    // World-space dot grid: the dots sit at fixed scene coordinates and are
+    // drawn in scene coordinates, so the whole grid scales with zoom - bigger
+    // as you zoom in, smaller as you zoom out - exactly like the canvas
+    // content. Drawing them as vector circles instead of a scaled pixmap is
+    // what keeps them crisp at every zoom level.
+    {
+        const double step = 16.0;     // grid spacing, scene units
+        const double radius = 1.2;    // dot radius, scene units
+
+        const double left = std::floor(rect.left() / step) * step;
+        const double top = std::floor(rect.top() / step) * step;
+
+        // At extreme zoom-out the grid collapses to a sub-pixel haze; skip
+        // drawing there so the dot count (and paint cost) stays bounded.
+        const double cols = (rect.right() - left) / step + 1.0;
+        const double rows = (rect.bottom() - top) / step + 1.0;
+
+        if (cols * rows <= 50000.0)
+        {
+            painter->save();
+            painter->setRenderHint(QPainter::Antialiasing, true);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(QColor(110, 110, 115));
+
+            for (double x = left; x <= rect.right(); x += step)
+            {
+                for (double y = top; y <= rect.bottom(); y += step)
+                    painter->drawEllipse(QPointF(x, y), radius, radius);
+            }
+
+            painter->restore();
+        }
+    }
+
+    // Snapping grid overlay: the design canvas divided into DivisionsX by
+    // DivisionsY cells. Drawn in scene coordinates (so it scales/pans with the
+    // canvas) with a cosmetic pen (so the lines stay a crisp 1px at any zoom).
+    if (GridSnap::Enabled() && m_document)
+    {
+        const QRectF canvas = m_document->GetCanvasRect();
+        const int dx = GridSnap::DivisionsX();
+        const int dy = GridSnap::DivisionsY();
+        const double zoom = transform().m11();
+
+        if (dx > 0 && dy > 0 && canvas.width() > 0.0 && canvas.height() > 0.0 && zoom > 0.0)
+        {
+            const double cellW = canvas.width() / dx;
+            const double cellH = canvas.height() / dy;
+
+            // Skip only when cells collapse to a sub-pixel wash. The threshold
+            // is low enough that a fine grid (e.g. Minecraft's 320x240, whose
+            // cells are ~4.5px tall on the canvas) still shows at the default
+            // fit-to-canvas zoom, so the overlay agrees with the active snap.
+            if (cellW * zoom >= 2.0 && cellH * zoom >= 2.0)
+            {
+                painter->save();
+                painter->setRenderHint(QPainter::Antialiasing, false);
+
+                QPen pen(QColor(120, 140, 170, 120));
+                pen.setCosmetic(true);
+                painter->setPen(pen);
+
+                for (int i = 0; i <= dx; ++i)
+                {
+                    const double x = canvas.left() + i * cellW;
+                    painter->drawLine(QPointF(x, canvas.top()), QPointF(x, canvas.bottom()));
+                }
+
+                for (int j = 0; j <= dy; ++j)
+                {
+                    const double y = canvas.top() + j * cellH;
+                    painter->drawLine(QPointF(canvas.left(), y), QPointF(canvas.right(), y));
+                }
+
+                painter->restore();
+            }
+        }
+    }
 }
 
 void ViewportWidget::paintEvent(QPaintEvent* event)
