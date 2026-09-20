@@ -3,46 +3,17 @@
 #include <QByteArray>
 #include <functional>
 
+// Thin forwarders to the one definition of the elements-only row index space,
+// which lives on UiElement. These were hand-copied walks; keeping them as
+// wrappers avoids touching every call site below.
 static UiElement* ElementAtRow(UiElement* parent, int row)
 {
-    int i = -1;
-
-    for (QObject* c : parent->children())
-    {
-        if (auto* e = qobject_cast<UiElement*>(c))
-        {
-            ++i;
-
-            if (i == row)
-                return e;
-        }
-    }
-
-    return nullptr;
+    return parent ? parent->ChildElementAt(row) : nullptr;
 }
 
 static int RowOfElement(UiElement* element)
 {
-    if (!element)
-        return -1;
-
-    auto* p = qobject_cast<UiElement*>(element->parent());
-
-    if (!p)
-        return -1;
-
-    int i = -1;
-
-    for (QObject* c : p->children())
-    {
-        if (auto* e = qobject_cast<UiElement*>(c))
-        {
-            ++i;
-            if (e == element) return i;
-        }
-    }
-
-    return -1;
+    return element ? element->RowInParent() : -1;
 }
 
 EntityTreeModel::EntityTreeModel(UiElement* root, QObject* parent) : QAbstractItemModel(parent), root(root)
@@ -108,15 +79,7 @@ int EntityTreeModel::rowCount(const QModelIndex& parentIndex) const
 {
     UiElement* parentElement = parentIndex.isValid() ? static_cast<UiElement*>(parentIndex.internalPointer()) : root;
 
-    int count = 0;
-
-    for (QObject* c : parentElement->children())
-    {
-        if (qobject_cast<UiElement*>(c))
-            ++count;
-    }
-
-    return count;
+    return parentElement ? parentElement->ChildElementCount() : 0;
 }
 
 int EntityTreeModel::columnCount(const QModelIndex&) const
@@ -214,24 +177,7 @@ bool EntityTreeModel::dropMimeData(const QMimeData* data, Qt::DropAction action,
 
     UiElement* parentElement = parentIndex.isValid() ? static_cast<UiElement*>(parentIndex.internalPointer()) : root;
 
-    std::function<UiElement*(UiElement*)> find = [&](UiElement* n) -> UiElement*
-    {
-        if (n->GetId() == id)
-            return n;
-
-        for (QObject* c : n->children())
-        {
-            if (auto* e = qobject_cast<UiElement*>(c))
-            {
-                if (auto* fnd = find(e))
-                    return fnd;
-            }
-        }
-
-        return nullptr;
-    };
-
-    UiElement* moving = find(root);
+    UiElement* moving = root ? root->FindById(id) : nullptr;
 
     if (!moving || moving == parentElement)
         return false;

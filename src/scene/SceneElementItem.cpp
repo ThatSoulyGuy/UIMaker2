@@ -13,11 +13,17 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-// Forward/inverse pair for anchor-based positioning. AnchorAdjustedItemPos maps a
-// component-space position to an item pos inside parentRect; InverseAnchorComponentPos
-// maps an item pos back to the component-space position. They are exact inverses of
-// each other and must change together.
-static QPointF AnchorAdjustedItemPos(const QPointF& pos, AnchorFlags anchors, const QRectF& parentRect, double w, double h)
+// Forward/inverse pair for anchor-based positioning. AnchorToItemPos maps a
+// component-space position to an item pos inside parentRect; ItemPosToComponent
+// maps an item pos back. They are exact inverses of each other and must change
+// together - the checks target asserts it.
+//
+// Pixel snapping is deliberately NOT done in here. It used to be applied to the
+// forward direction only, which made the pair disagree by up to half a unit in
+// PixelGrid mode (measured: 2.0 at unit 4) - and this pair governs every drag
+// write-back, so the error landed straight in the document. Callers snap the
+// RESULT instead; see RefreshFromComponents.
+QPointF SceneElementItem::AnchorToItemPos(const QPointF& pos, AnchorFlags anchors, const QRectF& parentRect, double w, double h)
 {
     double x = pos.x();
     double y = pos.y();
@@ -32,15 +38,10 @@ static QPointF AnchorAdjustedItemPos(const QPointF& pos, AnchorFlags anchors, co
     else if (anchors.testFlag(Anchor::CENTER_Y))
         y = (parentRect.height() - h) * 0.5 + pos.y();
 
-    // In PixelGrid mode, snap the resolved position to the virtual-pixel grid.
-    // This is where centring/anchoring produces fractional coordinates; snapping
-    // here makes anchored and centred elements land on whole pixels (identity in
-    // Continuous mode). The inverse stays exact - snapping only the forward
-    // direction is idempotent, so it converges rather than drifting.
-    return PixelModel::SnapPoint(parentRect.topLeft() + QPointF(x, y));
+    return parentRect.topLeft() + QPointF(x, y);
 }
 
-static QPointF InverseAnchorComponentPos(const QPointF& itemPos, AnchorFlags anchors, const QRectF& parentRect, double w, double h)
+QPointF SceneElementItem::ItemPosToComponent(const QPointF& itemPos, AnchorFlags anchors, const QRectF& parentRect, double w, double h)
 {
     QPointF p = itemPos - parentRect.topLeft();
 
@@ -144,7 +145,17 @@ void SceneElementItem::RefreshFromComponents()
         }
 
         if (!parentHasLayout)
-            setPosFromComponent(AnchorAdjustedItemPos(xform->GetPosition(), xform->GetAnchors(), parentRect, newRect.width(), newRect.height()));
+        {
+            // Resolve the anchor exactly, THEN snap for display. Anchoring and
+            // centring are where fractional coordinates come from, so this is
+            // still the right place to land on whole virtual pixels - it is just
+            // no longer baked into the forward map, which has to stay an exact
+            // inverse of ItemPosToComponent. Identity in Continuous mode.
+            const QPointF resolved = AnchorToItemPos(xform->GetPosition(), xform->GetAnchors(),
+                                                     parentRect, newRect.width(), newRect.height());
+
+            setPosFromComponent(PixelModel::SnapPoint(resolved));
+        }
 
         setTransformOriginPoint(newRect.center());
         setRotationFromComponent(xform->GetRotationDegrees());
@@ -244,7 +255,7 @@ QVariant SceneElementItem::itemChange(GraphicsItemChange change, const QVariant&
                 else if (scene())
                     parentRect = scene()->sceneRect();
 
-                xform->SetPosition(InverseAnchorComponentPos(pos(), xform->GetAnchors(), parentRect, localRect.width(), localRect.height()));
+                xform->SetPosition(ItemPosToComponent(pos(), xform->GetAnchors(), parentRect, localRect.width(), localRect.height()));
             }
         }
     }

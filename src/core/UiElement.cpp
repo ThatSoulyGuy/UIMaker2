@@ -89,6 +89,94 @@ int UiElement::GetSlotIndex() const
     return -1;
 }
 
+QList<UiElement*> UiElement::ChildElements() const
+{
+    QList<UiElement*> out;
+
+    for (QObject* c : children())
+    {
+        if (auto* e = qobject_cast<UiElement*>(c))
+            out.append(e);
+    }
+
+    return out;
+}
+
+int UiElement::ChildElementCount() const
+{
+    int n = 0;
+
+    for (QObject* c : children())
+    {
+        if (qobject_cast<UiElement*>(c))
+            ++n;
+    }
+
+    return n;
+}
+
+UiElement* UiElement::ChildElementAt(int row) const
+{
+    if (row < 0)
+        return nullptr;
+
+    int n = 0;
+
+    for (QObject* c : children())
+    {
+        if (auto* e = qobject_cast<UiElement*>(c))
+        {
+            if (n == row)
+                return e;
+
+            ++n;
+        }
+    }
+
+    return nullptr;
+}
+
+int UiElement::RowInParent() const
+{
+    auto* p = qobject_cast<UiElement*>(parent());
+
+    if (!p)
+        return -1;
+
+    int n = 0;
+
+    for (QObject* c : p->children())
+    {
+        if (auto* e = qobject_cast<UiElement*>(c))
+        {
+            if (e == this)
+                return n;
+
+            ++n;
+        }
+    }
+
+    return -1;
+}
+
+UiElement* UiElement::FindById(const QUuid& target)
+{
+    if (target.isNull())
+        return nullptr;
+
+    if (id == target)
+        return this;
+
+    // findChildren is recursive over all QObject descendants.
+    for (UiElement* e : findChildren<UiElement*>())
+    {
+        if (e && e->GetId() == target)
+            return e;
+    }
+
+    return nullptr;
+}
+
 UiElement* UiElement::AddChild(const QString& childName)
 {
     auto* e = new UiElement(childName, this);
@@ -111,19 +199,13 @@ bool UiElement::ReparentTo(UiElement* newParent, int insertPos)
 
     UiElement* oldParent = qobject_cast<UiElement*>(parent());
 
-    QList<UiElement*> ordered;
-    int currentIndex = -1;
+    // Same elements-only index space as ChildElementAt/RowInParent, minus self:
+    // insertPos is the FINAL row this element should occupy.
+    QList<UiElement*> ordered = newParent->ChildElements();
+    const int currentIndex = ordered.indexOf(const_cast<UiElement*>(this));
 
-    for (QObject* c : newParent->children())
-    {
-        if (auto* e = qobject_cast<UiElement*>(c))
-        {
-            if (e == this)
-                currentIndex = ordered.size();
-            else
-                ordered.append(e);
-        }
-    }
+    if (currentIndex >= 0)
+        ordered.removeAt(currentIndex);
 
     if (insertPos < 0 || insertPos > ordered.size())
         insertPos = ordered.size();

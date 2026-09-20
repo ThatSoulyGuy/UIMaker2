@@ -12,11 +12,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(QT NAMES Qt6 REQUIRED COMPONENTS Widgets)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 
-qt_add_executable(UIMaker2
-    MANUAL_FINALIZATION
+# Qt6::Test is used ONLY by the optional UIMaker2Checks target (QSignalSpy).
+find_package(Qt${QT_VERSION_MAJOR} QUIET COMPONENTS Test)
+
+# Shared source list. Compiled into BOTH the app and the checks target.
+#
+# Deliberately NOT a static library: REGISTER_COMPONENT (Component.hpp) registers
+# each component through a file-scope static initialiser, and the linker discards
+# object files from a static library when nothing references their symbols. The
+# registry would come back silently EMPTY and Component::Create would return
+# nullptr for every kind, with no error.
+set(UIMAKER_SOURCES
 
     # App
-    src/main.cpp
     src/app/MainWindow.hpp
     src/app/MainWindow.cpp
     src/app/mainwindow.ui
@@ -146,6 +154,29 @@ qt_add_executable(UIMaker2
     src/render/GizmoRenderPass.cpp
 )
 
+qt_add_executable(UIMaker2
+    MANUAL_FINALIZATION
+
+    src/main.cpp
+    ${UIMAKER_SOURCES}
+)
+
+# Assertions over the real types. Built on demand:
+#   cmake --build <dir> --target UIMaker2Checks
+#   QT_QPA_PLATFORM=offscreen ./UIMaker2Checks
+qt_add_executable(UIMaker2Checks
+    EXCLUDE_FROM_ALL
+    MANUAL_FINALIZATION
+
+    tools/checks/checks.cpp
+    tools/checks/checks.hpp
+    tools/checks/regressions.cpp
+    ${UIMAKER_SOURCES}
+)
+
+target_include_directories(UIMaker2Checks PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(UIMaker2Checks PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Test)
+
 target_include_directories(UIMaker2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_link_libraries(UIMaker2 PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
@@ -165,3 +196,4 @@ install(TARGETS UIMaker2
 )
 
 qt_finalize_executable(UIMaker2)
+qt_finalize_executable(UIMaker2Checks)

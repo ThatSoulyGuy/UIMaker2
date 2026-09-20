@@ -4,6 +4,8 @@
 #include <QGraphicsObject>
 #include <QPainter>
 
+#include "core/Anchor.hpp"
+
 class UiElement;
 
 class SceneElementItem : public QGraphicsObject
@@ -11,6 +13,17 @@ class SceneElementItem : public QGraphicsObject
     Q_OBJECT
 
 public:
+
+    // Forward/inverse pair for anchor-based positioning, exposed so the checks
+    // target can assert they really are inverses. AnchorToItemPos maps a
+    // component-space position to an item pos inside parentRect;
+    // ItemPosToComponent maps it back. They must change together.
+    static QPointF AnchorToItemPos(const QPointF& pos, AnchorFlags anchors,
+                                   const QRectF& parentRect, double w, double h);
+
+    static QPointF ItemPosToComponent(const QPointF& itemPos, AnchorFlags anchors,
+                                      const QRectF& parentRect, double w, double h);
+
 
     explicit SceneElementItem(UiElement* element);
     ~SceneElementItem() override = default;

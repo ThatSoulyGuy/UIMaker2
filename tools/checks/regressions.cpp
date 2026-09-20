@@ -1,5 +1,6 @@
-// Smoke checks for the two changes that are hard to reach by clicking:
-// the SceneDocument teardown order, and the UiBinReader bounds hardening.
+// Regression checks for defects that were fixed and must stay fixed. Each one
+// is here because it was either a crash, a data-loss path, or a behaviour the
+// plan's later stages depend on.
 #include "scene/SceneDocument.hpp"
 #include "scene/UiBinReader.hpp"
 #include "scene/UiBinCommon.hpp"
@@ -38,55 +39,53 @@
 #include "core/UiElement.hpp"
 
 #include <QApplication>
+#include "checks.hpp"
 #include <QByteArray>
 #include <QDataStream>
 #include <QIODevice>
 #include <cstdio>
 #include <cstring>
 
-static int failures = 0;
-static void check(bool ok, const char* what)
-{
-    std::fprintf(stderr, "  [%s] %s\n", ok ? "PASS" : "FAIL", what);
-    if (!ok) ++failures;
-}
 
-// Build a v4 header whose string-table length field is hostile.
-static QByteArray CraftedUiBin(quint32 strLen)
+namespace
 {
-    QByteArray body;
+    // A v4 header whose string-table length field is hostile. Before the bounds
+    // hardening, `cur + n > size` overflowed on this and read out of bounds.
+    QByteArray CraftedUiBin(quint32 strLen)
     {
-        QDataStream s(&body, QIODevice::WriteOnly);
-        s.setByteOrder(QDataStream::LittleEndian);
-        s << quint32(strLen);      // first string's length -> attacker controlled
+        QByteArray body;
+        {
+            QDataStream s(&body, QIODevice::WriteOnly);
+            s.setByteOrder(QDataStream::LittleEndian);
+            s << quint32(strLen);
+        }
+
+        QByteArray out;
+        out.append("UIB4", 4);
+        QDataStream h(&out, QIODevice::WriteOnly | QIODevice::Append);
+        h.setByteOrder(QDataStream::LittleEndian);
+        h << quint16(4) << quint16(0);
+        h << quint32(32) << quint32(1);
+        h << quint32(32 + body.size()) << quint32(0);
+        h << quint32(32 + body.size());
+        h << quint32(32 + body.size());
+
+        while (out.size() < 32) out.append('\0');
+
+        QByteArray masked = body;
+        uibin::Obfuscate(masked.data(), masked.size());
+        out.append(masked);
+
+        const quint32 total = quint32(out.size());
+        std::memcpy(out.data() + 28, &total, 4);
+
+        return out;
     }
-
-    QByteArray out;
-    out.append("UIB4", 4);
-    QDataStream h(&out, QIODevice::WriteOnly | QIODevice::Append);
-    h.setByteOrder(QDataStream::LittleEndian);
-    h << quint16(4) << quint16(0);              // version, flags
-    h << quint32(32) << quint32(1);             // strOff, strCount
-    h << quint32(32 + body.size()) << quint32(0);  // assetOff, assetCount
-    h << quint32(32 + body.size());             // treeOff
-    h << quint32(32 + body.size());             // fileSize
-
-    while (out.size() < 32) out.append('\0');
-
-    QByteArray masked = body;
-    uibin::Obfuscate(masked.data(), masked.size());
-    out.append(masked);
-
-    // fileSize must match what is on disk or the reader bails before we get there
-    const quint32 total = quint32(out.size());
-    std::memcpy(out.data() + 28, &total, 4);
-
-    return out;
 }
 
-int main(int argc, char** argv)
+void CheckRegressions()
 {
-    QApplication app(argc, argv);
+
 
     std::fprintf(stderr, "SceneDocument teardown order\n");
     {
@@ -354,18 +353,17 @@ int main(int argc, char** argv)
             }
         };
 
-        auto settle = []{ for (int i = 0; i < 8; ++i) qApp->processEvents(); };
 
         SceneDocument authored;
         build(authored, 12, 9);
-        settle();
+        Settle();
         const double authoredSum = checksum(authored);
 
         const QByteArray json = authored.ExportJson();
 
         SceneDocument loaded;
         check(loaded.LoadJson(json), "the authored scene reloads");
-        settle();
+        Settle();
         const double loadedSum = checksum(loaded);
 
         check(authoredSum == loadedSum, "batched load produces bit-identical geometry");
@@ -380,7 +378,7 @@ int main(int argc, char** argv)
         {
             SceneDocument src;
             build(src, sizes[k], 9);
-            settle();
+            Settle();
             const QByteArray blob = src.ExportJson();
             const int count = sizes[k] * 10;
 
@@ -399,7 +397,4 @@ int main(int argc, char** argv)
               "per-element load cost stays flat as the scene grows (linear, not quadratic)");
     }
 
-    std::fprintf(stderr, "%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASS",
-                failures, failures == 1 ? "" : "s");
-    return failures ? 1 : 0;
 }

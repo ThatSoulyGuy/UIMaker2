@@ -390,28 +390,11 @@ static void SortOpsForReplay(QList<StructuralOp>& ops)
 // for insertPos, and unlike a raw QObject children index it stays stable
 // across delete+recreate even if the parent's component set changes between
 // the two.
+// Forwards to UiElement's definition of the elements-only row index space.
+// This used to be a third hand-written copy of that walk.
 static int RowInParent(UiElement* e)
 {
-    if (!e)
-        return -1;
-
-    auto* parent = qobject_cast<UiElement*>(e->parent());
-    if (!parent)
-        return -1;
-
-    int row = 0;
-
-    for (QObject* c : parent->children())
-    {
-        if (auto* el = qobject_cast<UiElement*>(c))
-        {
-            if (el == e)
-                return row;
-            ++row;
-        }
-    }
-
-    return -1;
+    return e ? e->RowInParent() : -1;
 }
 
 

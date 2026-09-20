@@ -707,20 +707,7 @@ UiElement* SceneDocument::GetPrimarySelection() const
 
 UiElement* SceneDocument::FindById(const QUuid& id) const
 {
-    if (!root || id.isNull())
-        return nullptr;
-
-    if (root->GetId() == id)
-        return root;
-
-    // findChildren is recursive across all QObject descendants.
-    for (UiElement* e : root->findChildren<UiElement*>())
-    {
-        if (e && e->GetId() == id)
-            return e;
-    }
-
-    return nullptr;
+    return root ? root->FindById(id) : nullptr;
 }
 
 void SceneDocument::OnSceneSelectionChanged()
