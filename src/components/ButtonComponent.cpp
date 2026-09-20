@@ -1,4 +1,7 @@
 #include "components/ButtonComponent.hpp"
+#include "core/PixelDraw.hpp"
+#include "core/SpriteSidecar.hpp"
+#include "core/PixelModel.hpp"
 
 #include <QFont>
 #include <QFontMetrics>
@@ -36,12 +39,30 @@ void ButtonComponent::Update(SceneElementItem& item, QRectF& rect, const QRectF&
 bool ButtonComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
-    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter->setRenderHint(QPainter::Antialiasing, !PixelModel::PixelSnap());
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, !PixelModel::PixelSnap());
 
     const QPixmap& skin = !customSkin.isNull() ? customSkin : EnsureDefaultSkin();
 
-    DrawNineSlice(painter, rect, skin, sliceLeft, sliceTop, sliceRight, sliceBottom);
+    // Slice precedence: a sidecar .xml ships WITH the art and describes that
+    // art, so it wins. The sliceLeft/Top/Right/Bottom properties remain the
+    // fallback for a skin that has no sidecar, and are what the .uibin carries.
+    const SpriteSidecar::Meta meta = SpriteSidecar::MetaFor(imagePath);
+
+    PixelDraw::Slice slice = meta.hasSlice
+        ? meta.slice
+        : PixelDraw::Slice{ sliceLeft, sliceTop, sliceRight, sliceBottom };
+
+    if (tex.fill == PixelDraw::FillWrap)
+    {
+        PixelDraw::DrawTexture(painter, rect, skin, slice,
+                               tex.anchor, tex.cropOffsetX, tex.cropOffsetY,
+                               PixelDraw::FillWrap);
+    }
+    else
+    {
+        DrawNineSlice(painter, rect, skin, slice.left, slice.top, slice.right, slice.bottom);
+    }
 
     painter->setPen(textColor);
 
@@ -55,7 +76,7 @@ bool ButtonComponent::Paint(QPainter* painter, const QRectF& rect, bool selected
     {
         painter->setPen(QPen(QColor(0, 180, 255), 2, Qt::DashLine));
         painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(rect, 6.0, 6.0);
+        painter->drawRoundedRect(rect, PixelDraw::Radius(6.0), PixelDraw::Radius(6.0));
     }
 
     painter->restore();
@@ -137,6 +158,10 @@ void ButtonComponent::ToJson(QJsonObject& out) const
     out["sliceTop"] = sliceTop;
     out["sliceRight"] = sliceRight;
     out["sliceBottom"] = sliceBottom;
+    out["textureFill"] = tex.fill;
+    out["cropAnchor"] = tex.anchor;
+    out["cropOffsetX"] = tex.cropOffsetX;
+    out["cropOffsetY"] = tex.cropOffsetY;
 }
 
 void ButtonComponent::FromJson(const QJsonObject& in)
@@ -154,6 +179,10 @@ void ButtonComponent::FromJson(const QJsonObject& in)
     SetSliceTop(in["sliceTop"].toInt(6));
     SetSliceRight(in["sliceRight"].toInt(6));
     SetSliceBottom(in["sliceBottom"].toInt(6));
+    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillStretch));
+    SetCropAnchor(in["cropAnchor"].toInt(PixelDraw::Center));
+    SetCropOffsetX(in["cropOffsetX"].toInt(0));
+    SetCropOffsetY(in["cropOffsetY"].toInt(0));
 }
 
 void ButtonComponent::InvalidateDefaultSkin() { defaultSkin = QPixmap(); }
@@ -170,7 +199,7 @@ const QPixmap& ButtonComponent::EnsureDefaultSkin() const
     pm.fill(Qt::transparent);
 
     QPainter p(&pm);
-    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::Antialiasing, !PixelModel::PixelSnap());
 
     QLinearGradient g(0, 0, 0, baseH);
     QColor top = backgroundColor.lighter(115);
@@ -180,11 +209,11 @@ const QPixmap& ButtonComponent::EnsureDefaultSkin() const
 
     p.setPen(Qt::NoPen);
     p.setBrush(g);
-    p.drawRoundedRect(QRectF(0.5, 0.5, baseW - 1.0, baseH - 1.0), 6.0, 6.0);
+    p.drawRoundedRect(QRectF(0.5, 0.5, baseW - 1.0, baseH - 1.0), PixelDraw::Radius(6.0), PixelDraw::Radius(6.0));
 
     p.setPen(QPen(QColor(0, 0, 0, 110), 1.0));
     p.setBrush(Qt::NoBrush);
-    p.drawRoundedRect(QRectF(0.5, 0.5, baseW - 1.0, baseH - 1.0), 6.0, 6.0);
+    p.drawRoundedRect(QRectF(0.5, 0.5, baseW - 1.0, baseH - 1.0), PixelDraw::Radius(6.0), PixelDraw::Radius(6.0));
 
     p.setPen(QPen(QColor(255, 255, 255, 35), 1.0));
     p.drawLine(QPointF(6.0, 1.0), QPointF(baseW - 6.0, 1.0));
@@ -236,4 +265,42 @@ void ButtonComponent::DrawNineSlice(QPainter* painter, const QRectF& dest, const
     painter->drawPixmap(DR(x0,y2,dl,db), img, SR(0,t+midH,l,b));
     painter->drawPixmap(DR(x1,y2,dw,db), img, SR(l,t+midH,midW,b));
     painter->drawPixmap(DR(x2,y2,dr,db), img, SR(l+midW,t+midH,r,b));
+}
+
+int ButtonComponent::GetTextureFill() const noexcept { return tex.fill; }
+
+void ButtonComponent::SetTextureFill(int v)
+{
+    const int c = PixelDraw::ClampFill(v);
+    if (tex.fill == c) return;
+    tex.fill = c;
+    NotifyChanged();
+}
+
+int ButtonComponent::GetCropAnchor() const noexcept { return tex.anchor; }
+
+void ButtonComponent::SetCropAnchor(int v)
+{
+    const int c = PixelDraw::ClampAnchor(v);
+    if (tex.anchor == c) return;
+    tex.anchor = c;
+    NotifyChanged();
+}
+
+int ButtonComponent::GetCropOffsetX() const noexcept { return tex.cropOffsetX; }
+
+void ButtonComponent::SetCropOffsetX(int v)
+{
+    if (tex.cropOffsetX == v) return;
+    tex.cropOffsetX = v;
+    NotifyChanged();
+}
+
+int ButtonComponent::GetCropOffsetY() const noexcept { return tex.cropOffsetY; }
+
+void ButtonComponent::SetCropOffsetY(int v)
+{
+    if (tex.cropOffsetY == v) return;
+    tex.cropOffsetY = v;
+    NotifyChanged();
 }

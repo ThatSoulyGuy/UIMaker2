@@ -8,6 +8,7 @@
 #include <QDateTime>
 
 #include "core/Component.hpp"
+#include "core/PixelDraw.hpp"
 
 class ImageComponent : public Component
 {
@@ -18,6 +19,15 @@ class ImageComponent : public Component
     Q_PROPERTY(QString assetRegistryValue READ GetAssetRegistryValue WRITE SetAssetRegistryValue NOTIFY ComponentChanged)
     Q_PROPERTY(bool pixelated READ IsPixelated WRITE SetPixelated NOTIFY ComponentChanged)
 
+    // Pixel-perfect drawing. textureFill 0 = Stretch (scale to fit, the
+    // pre-existing behaviour), 1 = Wrap (repeat and crop, one texel per virtual
+    // pixel). cropAnchor 0..8 reads top-left..bottom-right and decides which
+    // part survives a crop / where the tiling phase starts.
+    Q_PROPERTY(int textureFill READ GetTextureFill WRITE SetTextureFill NOTIFY ComponentChanged)
+    Q_PROPERTY(int cropAnchor READ GetCropAnchor WRITE SetCropAnchor NOTIFY ComponentChanged)
+    Q_PROPERTY(int cropOffsetX READ GetCropOffsetX WRITE SetCropOffsetX NOTIFY ComponentChanged)
+    Q_PROPERTY(int cropOffsetY READ GetCropOffsetY WRITE SetCropOffsetY NOTIFY ComponentChanged)
+
 public:
 
     explicit ImageComponent(QObject* parent = nullptr);
@@ -27,6 +37,18 @@ public:
     void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override;
 
     bool Paint(QPainter* painter, const QRectF& rect, bool selected) override;
+
+    int GetTextureFill() const noexcept;
+    void SetTextureFill(int v);
+
+    int GetCropAnchor() const noexcept;
+    void SetCropAnchor(int v);
+
+    int GetCropOffsetX() const noexcept;
+    void SetCropOffsetX(int v);
+
+    int GetCropOffsetY() const noexcept;
+    void SetCropOffsetY(int v);
 
     QString GetImagePath() const noexcept;
 
@@ -70,6 +92,8 @@ private:
     bool pixelated;
     QPixmap pixmap;
     QString resolvedPath;
+    PixelDraw::TextureParams tex;
+
     QDateTime resolvedMtime;
     QPixmap tintedPixmap;
     QColor tintedPixmapColor;

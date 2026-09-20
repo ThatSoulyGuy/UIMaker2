@@ -14,5 +14,6 @@ void CheckGeometryChecksum();
 void CheckAnchorRoundTrip();
 void CheckRegressions();
 void CheckPixelSpans();
+void CheckPixelRaster();
 
 #endif

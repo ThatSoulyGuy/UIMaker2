@@ -11,6 +11,9 @@
 #include "core/PixelModel.hpp"
 
 #include <QVector>
+#include <QImage>
+#include <QPainter>
+#include <QPixmap>
 
 #include <cstdio>
 
@@ -267,4 +270,109 @@ void CheckPixelSpans()
         PixelModel::SetMode(PixelModel::Mode::Continuous);
         PixelModel::SetUnit(1.0);
     }
+}
+
+
+// ---------------------------------------------------------------------------
+// The RASTER, not just the geometry: render through DrawTexture and assert that
+// every destination virtual pixel is a SOLID unit x unit block carrying exactly
+// the texel the span solver says it should. Solid blocks prove nearest-neighbour
+// with no resampling (requirement b); matching texels prove 1 texel == 1 virtual
+// pixel (requirement c) and that wrapping honours the slice (requirements d, e).
+// ---------------------------------------------------------------------------
+void CheckPixelRaster()
+{
+    std::fprintf(stderr, "5. texel-exact raster\n");
+
+    const int tw = 8, th = 8;
+    const int unit = 5;
+    const int dwVpx = 21, dhVpx = 17;   // deliberately not a multiple of anything
+
+    // Each texel a unique colour, so a mis-sampled pixel is unambiguous.
+    QImage texImg(tw, th, QImage::Format_ARGB32);
+    for (int y = 0; y < th; ++y)
+        for (int x = 0; x < tw; ++x)
+            texImg.setPixel(x, y, qRgb(20 + x * 28, 20 + y * 28, 90));
+
+    const QPixmap tex = QPixmap::fromImage(texImg);
+
+    PixelModel::SetMode(PixelModel::Mode::PixelGrid);
+    PixelModel::SetUnit(double(unit));
+
+    Slice slice;
+    slice.left = 2; slice.top = 2; slice.right = 2; slice.bottom = 2;
+
+    QImage out(dwVpx * unit, dhVpx * unit, QImage::Format_ARGB32);
+    out.fill(Qt::black);
+    {
+        QPainter p(&out);
+        DrawTexture(&p, QRectF(0, 0, dwVpx * unit, dhVpx * unit), tex,
+                    slice, Center, 0, 0, FillWrap);
+    }
+
+    // What the solver says each destination column/row should sample.
+    QVector<Span> cols, rows;
+    SolveAxis(tw, slice.left, slice.right, dwVpx, SideX(Center), 0, cols);
+    SolveAxis(th, slice.top, slice.bottom, dhVpx, SideY(Center), 0, rows);
+
+    auto srcAt = [](const QVector<Span>& spans, int at)
+    {
+        for (const Span& s : spans)
+            if (at >= s.dstStart && at < s.dstStart + s.len)
+                return s.srcStart + (at - s.dstStart);
+        return -1;
+    };
+
+    bool allSolid = true;
+    bool allMatch = true;
+    int firstBadX = -1, firstBadY = -1;
+
+    for (int dy = 0; dy < dhVpx && allMatch; ++dy)
+    {
+        for (int dx = 0; dx < dwVpx; ++dx)
+        {
+            const QRgb expected = texImg.pixel(srcAt(cols, dx), srcAt(rows, dy));
+            const QRgb got = out.pixel(dx * unit, dy * unit);
+
+            if (got != expected)
+            {
+                allMatch = false;
+                firstBadX = dx; firstBadY = dy;
+                break;
+            }
+
+            // Every pixel of the block must be identical - no interpolation.
+            for (int py = 0; py < unit && allSolid; ++py)
+                for (int px = 0; px < unit; ++px)
+                    if (out.pixel(dx * unit + px, dy * unit + py) != expected)
+                        { allSolid = false; break; }
+        }
+    }
+
+    check(allMatch, "every virtual pixel samples exactly the texel the solver chose");
+    if (!allMatch)
+        std::fprintf(stderr, "      first mismatch at vpx (%d,%d)\n", firstBadX, firstBadY);
+
+    check(allSolid, "and each is a SOLID unit x unit block - nearest-neighbour, never resampled");
+
+    // The pinned edges really are pinned: destination column 0 is texel 0.
+    check(srcAt(cols, 0) == 0 && srcAt(cols, 1) == 1, "left slice pinned in the raster");
+    check(srcAt(cols, dwVpx - 1) == tw - 1, "right slice pinned in the raster");
+    check(srcAt(rows, dhVpx - 1) == th - 1, "bottom slice pinned in the raster");
+
+    // Stretch mode must still scale, so the legacy look is unchanged.
+    {
+        QImage st(dwVpx * unit, dhVpx * unit, QImage::Format_ARGB32);
+        st.fill(Qt::black);
+        {
+            QPainter p(&st);
+            DrawTexture(&p, QRectF(0, 0, st.width(), st.height()), tex,
+                        slice, Center, 0, 0, FillStretch);
+        }
+        check(st.pixel(0, 0) == texImg.pixel(0, 0), "stretch still maps the source corner to the dest corner");
+        check(st != out, "and produces a different raster from wrap");
+    }
+
+    PixelModel::SetMode(PixelModel::Mode::Continuous);
+    PixelModel::SetUnit(1.0);
 }

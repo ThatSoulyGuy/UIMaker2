@@ -1,4 +1,6 @@
 #include "components/TooltipComponent.hpp"
+#include "core/PixelDraw.hpp"
+#include "core/PixelModel.hpp"
 
 #include <QFont>
 #include <QFontMetrics>
@@ -37,7 +39,7 @@ void TooltipComponent::Update(SceneElementItem& item, QRectF& rect, const QRectF
 bool TooltipComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::Antialiasing, !PixelModel::PixelSnap());
 
     double arrowH = 8.0;
     QRectF bodyRect(rect.x(), rect.y(), rect.width(), rect.height() - arrowH);
@@ -46,7 +48,7 @@ bool TooltipComponent::Paint(QPainter* painter, const QRectF& rect, bool selecte
     borderPen.setCosmetic(true);
     painter->setPen(borderPen);
     painter->setBrush(m_backgroundColor);
-    painter->drawRoundedRect(bodyRect, 4.0, 4.0);
+    painter->drawRoundedRect(bodyRect, PixelDraw::Radius(4.0), PixelDraw::Radius(4.0));
 
     // Draw arrow pointing down
     double arrowW = 12.0;

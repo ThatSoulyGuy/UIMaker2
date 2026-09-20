@@ -348,6 +348,43 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         return combo;
     }
 
+    // Pixel-perfect texture knobs. Dispatched by NAME for the same reason
+    // "shape" and "direction" are: a Q_ENUM declared in a holder class reports
+    // isEnumType() == false, so the generic enum branch below never fires and
+    // the property would render as a dead read-only label.
+    if (name == "textureFill" || name == "cropAnchor")
+    {
+        auto* combo = new QComboBox();
+
+        if (name == "textureFill")
+        {
+            combo->addItem("Stretch");            // PixelDraw::FillStretch
+            combo->addItem("Wrap (pixel-exact)"); // PixelDraw::FillWrap
+        }
+        else
+        {
+            // Order matches PixelDraw::Anchor exactly: 0..8 reading rows.
+            combo->addItem("Top Left");    combo->addItem("Top");    combo->addItem("Top Right");
+            combo->addItem("Left");        combo->addItem("Center"); combo->addItem("Right");
+            combo->addItem("Bottom Left"); combo->addItem("Bottom"); combo->addItem("Bottom Right");
+        }
+
+        combo->setCurrentIndex(object->property(prop.name()).toInt());
+
+        QPointer<QObject> obj = object;
+        QObject::connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, obj, prop](int index)
+        {
+            if (!obj)
+                return;
+            suppressRebuild = true;
+            ApplyPropertyChange(obj, prop.name(), index);
+            suppressRebuild = false;
+            emit PropertyEdited();
+        });
+
+        return combo;
+    }
+
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     if (isType(bool{}))
 #else

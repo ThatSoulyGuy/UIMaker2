@@ -96,6 +96,31 @@ namespace PixelDraw
     double SnapLength(double v);
     QRectF SnapRect(const QRectF& r);
 
+    // The per-element knobs, shared by every textured component.
+    //
+    // They are declared as four separate int Q_PROPERTYs on each component
+    // rather than on a common base class: PropertyEditorPanel and UiBinWriter
+    // both walk metaObject() from propertyOffset(), which restricts them to the
+    // most-derived class, so a property on an intermediate base would silently
+    // vanish from both the inspector and the bake.
+    struct TextureParams
+    {
+        int fill = FillStretch;   // FillStretch keeps the pre-existing look
+        int anchor = Center;
+        int cropOffsetX = 0;
+        int cropOffsetY = 0;
+    };
+
+    // Clamping setters, so a hand-edited scene.json or a stale .uibin cannot
+    // put an out-of-range value into the draw path.
+    int ClampFill(int v) noexcept;
+    int ClampAnchor(int v) noexcept;
+
+    // Corner radius for the placeholder mocks: 0 in PixelGrid mode, since a
+    // rounded corner cannot be drawn on a pixel grid without either
+    // antialiasing or an arbitrary stair-step. Identity in Continuous mode.
+    double Radius(double r);
+
     // Draw `tex` into `dest` (SCENE units). In FillWrap the texture is tiled and
     // cropped per the slice and anchor; in FillStretch it is scaled, which is
     // the pre-existing behaviour and what Continuous mode keeps using.

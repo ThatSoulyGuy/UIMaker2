@@ -5,6 +5,9 @@
 #include <QFileInfo>
 
 #include "core/AssetContext.hpp"
+#include "core/PixelDraw.hpp"
+#include "core/PixelModel.hpp"
+#include "core/SpriteSidecar.hpp"
 
 REGISTER_COMPONENT(ImageComponent, "Image")
 
@@ -42,12 +45,21 @@ bool ImageComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
         return false;
 
     painter->save();
-    painter->setOpacity(1.0);
-    painter->setRenderHint(QPainter::SmoothPixmapTransform, !pixelated);
+
+    // PixelGrid means pixel-art: nearest-neighbour regardless of the per-element
+    // flag, which only governs Continuous mode.
+    const bool crisp = pixelated || PixelModel::PixelSnap();
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, !crisp);
 
     const QPixmap& drawn = (tint.isValid() && tint != QColor(Qt::white)) ? EnsureTintedPixmap() : pixmap;
 
-    painter->drawPixmap(rect, drawn, QRectF(QPointF(0.0, 0.0), QSizeF(drawn.width(), drawn.height())));
+    // The tinted copy is pixel-identical in size to the source, so slice and
+    // crop texel indices are valid against either.
+    const SpriteSidecar::Meta meta = SpriteSidecar::MetaFor(imagePath);
+
+    PixelDraw::DrawTexture(painter, rect, drawn,
+                           meta.slice, tex.anchor, tex.cropOffsetX, tex.cropOffsetY,
+                           static_cast<PixelDraw::Fill>(tex.fill));
 
     if (selected)
     {
@@ -59,6 +71,54 @@ bool ImageComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
     painter->restore();
 
     return true;
+}
+
+int ImageComponent::GetTextureFill() const noexcept { return tex.fill; }
+
+void ImageComponent::SetTextureFill(int v)
+{
+    const int c = PixelDraw::ClampFill(v);
+
+    if (tex.fill == c)
+        return;
+
+    tex.fill = c;
+    NotifyChanged();
+}
+
+int ImageComponent::GetCropAnchor() const noexcept { return tex.anchor; }
+
+void ImageComponent::SetCropAnchor(int v)
+{
+    const int c = PixelDraw::ClampAnchor(v);
+
+    if (tex.anchor == c)
+        return;
+
+    tex.anchor = c;
+    NotifyChanged();
+}
+
+int ImageComponent::GetCropOffsetX() const noexcept { return tex.cropOffsetX; }
+
+void ImageComponent::SetCropOffsetX(int v)
+{
+    if (tex.cropOffsetX == v)
+        return;
+
+    tex.cropOffsetX = v;
+    NotifyChanged();
+}
+
+int ImageComponent::GetCropOffsetY() const noexcept { return tex.cropOffsetY; }
+
+void ImageComponent::SetCropOffsetY(int v)
+{
+    if (tex.cropOffsetY == v)
+        return;
+
+    tex.cropOffsetY = v;
+    NotifyChanged();
 }
 
 QString ImageComponent::GetImagePath() const noexcept
@@ -151,6 +211,10 @@ void ImageComponent::ToJson(QJsonObject& out) const
     out["assetDomain"] = assetDomain;
     out["assetRegistryValue"] = assetRegistryValue;
     out["pixelated"] = pixelated;
+    out["textureFill"] = tex.fill;
+    out["cropAnchor"] = tex.anchor;
+    out["cropOffsetX"] = tex.cropOffsetX;
+    out["cropOffsetY"] = tex.cropOffsetY;
 }
 
 void ImageComponent::FromJson(const QJsonObject& in)
@@ -160,6 +224,10 @@ void ImageComponent::FromJson(const QJsonObject& in)
     SetAssetDomain(in["assetDomain"].toString());
     SetAssetRegistryValue(in["assetRegistryValue"].toString());
     SetPixelated(in["pixelated"].toBool(false));
+    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillStretch));
+    SetCropAnchor(in["cropAnchor"].toInt(PixelDraw::Center));
+    SetCropOffsetX(in["cropOffsetX"].toInt(0));
+    SetCropOffsetY(in["cropOffsetY"].toInt(0));
 }
 
 void ImageComponent::ReloadPixmap()

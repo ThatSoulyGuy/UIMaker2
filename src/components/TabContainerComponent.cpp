@@ -1,4 +1,5 @@
 #include "components/TabContainerComponent.hpp"
+#include "core/PixelModel.hpp"
 
 #include <algorithm>
 
@@ -54,7 +55,7 @@ void TabContainerComponent::Update(SceneElementItem& item, QRectF& rect, const Q
 bool TabContainerComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::Antialiasing, !PixelModel::PixelSnap());
 
     QStringList tabs = m_tabNames.split(',', Qt::SkipEmptyParts);
     int tabCount = std::max(1, static_cast<int>(tabs.size()));

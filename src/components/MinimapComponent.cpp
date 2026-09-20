@@ -1,4 +1,5 @@
 #include "components/MinimapComponent.hpp"
+#include "core/PixelModel.hpp"
 
 #include <QColor>
 #include <QJsonObject>
@@ -22,7 +23,7 @@ QString MinimapComponent::GetTypeName() const { return QStringLiteral("Minimap")
 bool MinimapComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::Antialiasing, !PixelModel::PixelSnap());
 
     QPen borderPen(m_borderColor, m_borderWidth);
     borderPen.setCosmetic(true);

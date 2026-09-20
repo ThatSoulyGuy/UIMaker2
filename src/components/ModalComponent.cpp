@@ -1,4 +1,6 @@
 #include "components/ModalComponent.hpp"
+#include "core/PixelDraw.hpp"
+#include "core/PixelModel.hpp"
 
 #include <QColor>
 #include <QJsonObject>
@@ -22,7 +24,7 @@ QString ModalComponent::GetTypeName() const { return QStringLiteral("Modal"); }
 bool ModalComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::Antialiasing, !PixelModel::PixelSnap());
 
     // Draw semi-transparent overlay
     painter->setPen(Qt::NoPen);
@@ -41,7 +43,7 @@ bool ModalComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
     borderPen.setCosmetic(true);
     painter->setPen(borderPen);
     painter->setBrush(m_panelColor);
-    painter->drawRoundedRect(panelRect, m_cornerRadius, m_cornerRadius);
+    painter->drawRoundedRect(panelRect, PixelDraw::Radius(m_cornerRadius), PixelDraw::Radius(m_cornerRadius));
 
     // "X" close button indicator
     double btnSize = 20.0;

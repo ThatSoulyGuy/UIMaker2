@@ -1,4 +1,7 @@
 #include "components/DragSlotComponent.hpp"
+#include "core/PixelDraw.hpp"
+#include "core/SpriteSidecar.hpp"
+#include "core/PixelModel.hpp"
 
 #include <QColor>
 #include <QJsonObject>
@@ -37,14 +40,14 @@ void DragSlotComponent::Update(SceneElementItem& item, QRectF& rect, const QRect
 bool DragSlotComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
-    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter->setRenderHint(QPainter::Antialiasing, !PixelModel::PixelSnap());
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, !PixelModel::PixelSnap());
 
     QPen borderPen(m_borderColor, 1);
     borderPen.setCosmetic(true);
     painter->setPen(borderPen);
     painter->setBrush(m_backgroundColor);
-    painter->drawRoundedRect(rect, m_cornerRadius, m_cornerRadius);
+    painter->drawRoundedRect(rect, PixelDraw::Radius(m_cornerRadius), PixelDraw::Radius(m_cornerRadius));
 
     if (m_isEmpty)
     {
@@ -52,13 +55,16 @@ bool DragSlotComponent::Paint(QPainter* painter, const QRectF& rect, bool select
         QRectF inner = rect.adjusted(4, 4, -4, -4);
         painter->setPen(Qt::NoPen);
         painter->setBrush(m_emptyColor);
-        painter->drawRoundedRect(inner, m_cornerRadius, m_cornerRadius);
+        painter->drawRoundedRect(inner, PixelDraw::Radius(m_cornerRadius), PixelDraw::Radius(m_cornerRadius));
     }
     else if (!m_iconPixmap.isNull())
     {
         // Draw icon centered with padding
         QRectF iconRect = rect.adjusted(6, 6, -6, -6);
-        painter->drawPixmap(iconRect, m_iconPixmap, QRectF(QPointF(0, 0), QSizeF(m_iconPixmap.size())));
+        PixelDraw::DrawTexture(painter, iconRect, m_iconPixmap,
+                               SpriteSidecar::MetaFor(m_iconPath).slice,
+                               tex.anchor, tex.cropOffsetX, tex.cropOffsetY,
+                               static_cast<PixelDraw::Fill>(tex.fill));
     }
     else
     {
@@ -66,7 +72,7 @@ bool DragSlotComponent::Paint(QPainter* painter, const QRectF& rect, bool select
         QRectF inner = rect.adjusted(8, 8, -8, -8);
         painter->setPen(Qt::NoPen);
         painter->setBrush(QColor(120, 100, 60, 150));
-        painter->drawRoundedRect(inner, 2.0, 2.0);
+        painter->drawRoundedRect(inner, PixelDraw::Radius(2.0), PixelDraw::Radius(2.0));
     }
 
     if (selected)
@@ -75,7 +81,7 @@ bool DragSlotComponent::Paint(QPainter* painter, const QRectF& rect, bool select
         selPen.setCosmetic(true);
         painter->setPen(selPen);
         painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(rect, m_cornerRadius, m_cornerRadius);
+        painter->drawRoundedRect(rect, PixelDraw::Radius(m_cornerRadius), PixelDraw::Radius(m_cornerRadius));
     }
 
     painter->restore();
@@ -133,6 +139,10 @@ void DragSlotComponent::ToJson(QJsonObject& out) const
     out["iconPath"] = m_iconPath;
     out["assetDomain"] = m_assetDomain;
     out["assetRegistryValue"] = m_assetRegistryValue;
+    out["textureFill"] = tex.fill;
+    out["cropAnchor"] = tex.anchor;
+    out["cropOffsetX"] = tex.cropOffsetX;
+    out["cropOffsetY"] = tex.cropOffsetY;
 }
 
 void DragSlotComponent::FromJson(const QJsonObject& in)
@@ -146,4 +156,46 @@ void DragSlotComponent::FromJson(const QJsonObject& in)
     SetIconPath(in["iconPath"].toString());
     SetAssetDomain(in["assetDomain"].toString());
     SetAssetRegistryValue(in["assetRegistryValue"].toString());
+    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillStretch));
+    SetCropAnchor(in["cropAnchor"].toInt(PixelDraw::Center));
+    SetCropOffsetX(in["cropOffsetX"].toInt(0));
+    SetCropOffsetY(in["cropOffsetY"].toInt(0));
+}
+
+int DragSlotComponent::GetTextureFill() const noexcept { return tex.fill; }
+
+void DragSlotComponent::SetTextureFill(int v)
+{
+    const int c = PixelDraw::ClampFill(v);
+    if (tex.fill == c) return;
+    tex.fill = c;
+    NotifyChanged();
+}
+
+int DragSlotComponent::GetCropAnchor() const noexcept { return tex.anchor; }
+
+void DragSlotComponent::SetCropAnchor(int v)
+{
+    const int c = PixelDraw::ClampAnchor(v);
+    if (tex.anchor == c) return;
+    tex.anchor = c;
+    NotifyChanged();
+}
+
+int DragSlotComponent::GetCropOffsetX() const noexcept { return tex.cropOffsetX; }
+
+void DragSlotComponent::SetCropOffsetX(int v)
+{
+    if (tex.cropOffsetX == v) return;
+    tex.cropOffsetX = v;
+    NotifyChanged();
+}
+
+int DragSlotComponent::GetCropOffsetY() const noexcept { return tex.cropOffsetY; }
+
+void DragSlotComponent::SetCropOffsetY(int v)
+{
+    if (tex.cropOffsetY == v) return;
+    tex.cropOffsetY = v;
+    NotifyChanged();
 }

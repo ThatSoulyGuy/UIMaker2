@@ -1,4 +1,7 @@
 #include "components/IconComponent.hpp"
+#include "core/PixelDraw.hpp"
+#include "core/SpriteSidecar.hpp"
+#include "core/PixelModel.hpp"
 
 #include <QPainter>
 #include <QPen>
@@ -39,13 +42,16 @@ void IconComponent::Update(SceneElementItem& item, QRectF& rect, const QRectF& p
 bool IconComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, !PixelModel::PixelSnap());
 
     if (!m_pixmap.isNull())
     {
         painter->setOpacity(1.0);
         const QPixmap& drawn = (m_tintColor.isValid() && m_tintColor != QColor(Qt::white)) ? EnsureTintedPixmap() : m_pixmap;
-        painter->drawPixmap(rect, drawn, QRectF(QPointF(0, 0), QSizeF(drawn.size())));
+        PixelDraw::DrawTexture(painter, rect, drawn,
+                               SpriteSidecar::MetaFor(m_imagePath).slice,
+                               tex.anchor, tex.cropOffsetX, tex.cropOffsetY,
+                               static_cast<PixelDraw::Fill>(tex.fill));
     }
     else
     {
@@ -105,6 +111,10 @@ void IconComponent::ToJson(QJsonObject& out) const
     out["iconSize"] = m_iconSize;
     out["assetDomain"] = m_assetDomain;
     out["assetRegistryValue"] = m_assetRegistryValue;
+    out["textureFill"] = tex.fill;
+    out["cropAnchor"] = tex.anchor;
+    out["cropOffsetX"] = tex.cropOffsetX;
+    out["cropOffsetY"] = tex.cropOffsetY;
 }
 
 void IconComponent::FromJson(const QJsonObject& in)
@@ -114,6 +124,10 @@ void IconComponent::FromJson(const QJsonObject& in)
     SetIconSize(in["iconSize"].toInt(32));
     SetAssetDomain(in["assetDomain"].toString());
     SetAssetRegistryValue(in["assetRegistryValue"].toString());
+    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillStretch));
+    SetCropAnchor(in["cropAnchor"].toInt(PixelDraw::Center));
+    SetCropOffsetX(in["cropOffsetX"].toInt(0));
+    SetCropOffsetY(in["cropOffsetY"].toInt(0));
 }
 
 void IconComponent::ReloadPixmap()
@@ -163,4 +177,42 @@ const QPixmap& IconComponent::EnsureTintedPixmap()
     m_tintedPixmapColor = m_tintColor;
 
     return m_tintedPixmap;
+}
+
+int IconComponent::GetTextureFill() const noexcept { return tex.fill; }
+
+void IconComponent::SetTextureFill(int v)
+{
+    const int c = PixelDraw::ClampFill(v);
+    if (tex.fill == c) return;
+    tex.fill = c;
+    NotifyChanged();
+}
+
+int IconComponent::GetCropAnchor() const noexcept { return tex.anchor; }
+
+void IconComponent::SetCropAnchor(int v)
+{
+    const int c = PixelDraw::ClampAnchor(v);
+    if (tex.anchor == c) return;
+    tex.anchor = c;
+    NotifyChanged();
+}
+
+int IconComponent::GetCropOffsetX() const noexcept { return tex.cropOffsetX; }
+
+void IconComponent::SetCropOffsetX(int v)
+{
+    if (tex.cropOffsetX == v) return;
+    tex.cropOffsetX = v;
+    NotifyChanged();
+}
+
+int IconComponent::GetCropOffsetY() const noexcept { return tex.cropOffsetY; }
+
+void IconComponent::SetCropOffsetY(int v)
+{
+    if (tex.cropOffsetY == v) return;
+    tex.cropOffsetY = v;
+    NotifyChanged();
 }

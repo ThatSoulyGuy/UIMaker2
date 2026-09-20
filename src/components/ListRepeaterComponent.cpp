@@ -1,4 +1,5 @@
 #include "components/ListRepeaterComponent.hpp"
+#include "core/PixelModel.hpp"
 
 #include <algorithm>
 
@@ -46,7 +47,7 @@ void ListRepeaterComponent::Update(SceneElementItem& item, QRectF& rect, const Q
 bool ListRepeaterComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::Antialiasing, !PixelModel::PixelSnap());
 
     QFont font;
     font.setPixelSize(12);

@@ -1,4 +1,6 @@
 #include "components/ProgressBarComponent.hpp"
+#include "core/PixelDraw.hpp"
+#include "core/PixelModel.hpp"
 
 #include <QPainter>
 #include <QPen>
@@ -20,13 +22,13 @@ QString ProgressBarComponent::GetTypeName() const { return QStringLiteral("Progr
 bool ProgressBarComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::Antialiasing, !PixelModel::PixelSnap());
 
     QPen borderPen(m_borderColor, 1);
     borderPen.setCosmetic(true);
     painter->setPen(borderPen);
     painter->setBrush(m_backgroundColor);
-    painter->drawRoundedRect(rect, m_cornerRadius, m_cornerRadius);
+    painter->drawRoundedRect(rect, PixelDraw::Radius(m_cornerRadius), PixelDraw::Radius(m_cornerRadius));
 
     double clamped = std::clamp(m_value, 0.0, 1.0);
     QRectF fillRect;
@@ -40,7 +42,7 @@ bool ProgressBarComponent::Paint(QPainter* painter, const QRectF& rect, bool sel
     {
         painter->setPen(Qt::NoPen);
         painter->setBrush(m_fillColor);
-        painter->drawRoundedRect(fillRect, m_cornerRadius, m_cornerRadius);
+        painter->drawRoundedRect(fillRect, PixelDraw::Radius(m_cornerRadius), PixelDraw::Radius(m_cornerRadius));
     }
 
     if (selected)
@@ -49,7 +51,7 @@ bool ProgressBarComponent::Paint(QPainter* painter, const QRectF& rect, bool sel
         selPen.setCosmetic(true);
         painter->setPen(selPen);
         painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(rect, m_cornerRadius, m_cornerRadius);
+        painter->drawRoundedRect(rect, PixelDraw::Radius(m_cornerRadius), PixelDraw::Radius(m_cornerRadius));
     }
 
     painter->restore();

@@ -43,6 +43,8 @@ set(UIMAKER_SOURCES
     src/core/PixelModel.cpp
     src/core/PixelDraw.hpp
     src/core/PixelDraw.cpp
+    src/core/SpriteSidecar.hpp
+    src/core/SpriteSidecar.cpp
 
     # Components
     src/components/TransformComponent.hpp

@@ -1,4 +1,6 @@
 #include "components/PanelComponent.hpp"
+#include "core/PixelDraw.hpp"
+#include "core/PixelModel.hpp"
 
 #include <QPainter>
 #include <QPen>
@@ -17,7 +19,7 @@ QString PanelComponent::GetTypeName() const { return QStringLiteral("Panel"); }
 bool PanelComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::Antialiasing, !PixelModel::PixelSnap());
 
     if (m_borderWidth > 0.0)
     {
@@ -31,7 +33,7 @@ bool PanelComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
     }
 
     painter->setBrush(m_backgroundColor);
-    painter->drawRoundedRect(rect, m_cornerRadius, m_cornerRadius);
+    painter->drawRoundedRect(rect, PixelDraw::Radius(m_cornerRadius), PixelDraw::Radius(m_cornerRadius));
 
     if (selected)
     {
@@ -39,7 +41,7 @@ bool PanelComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
         selPen.setCosmetic(true);
         painter->setPen(selPen);
         painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(rect, m_cornerRadius, m_cornerRadius);
+        painter->drawRoundedRect(rect, PixelDraw::Radius(m_cornerRadius), PixelDraw::Radius(m_cornerRadius));
     }
 
     painter->restore();

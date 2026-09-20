@@ -25,6 +25,16 @@ namespace PixelDraw
         return top >= 0 && bottom >= 0 && top + bottom < h;
     }
 
+    int ClampFill(int v) noexcept
+    {
+        return (v == FillWrap) ? FillWrap : FillStretch;
+    }
+
+    int ClampAnchor(int v) noexcept
+    {
+        return (v < TopLeft || v > BottomRight) ? Center : v;
+    }
+
     Side SideX(int anchor) noexcept
     {
         switch (anchor)
@@ -133,6 +143,11 @@ namespace PixelDraw
         // Never collapse a visible element to nothing: a sub-unit element still
         // occupies one virtual pixel.
         return std::max(u, std::round(v / u) * u);
+    }
+
+    double Radius(double r)
+    {
+        return PixelModel::PixelSnap() ? 0.0 : r;
     }
 
     QRectF SnapRect(const QRectF& r)

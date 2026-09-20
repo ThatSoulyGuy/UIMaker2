@@ -260,6 +260,7 @@ int main(int argc, char** argv)
     CheckGeometryChecksum();
     CheckAnchorRoundTrip();
     CheckPixelSpans();
+    CheckPixelRaster();
     CheckRegressions();
 
     std::fprintf(stderr, "\n%s (%d failure%s)\n",

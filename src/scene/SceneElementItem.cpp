@@ -7,6 +7,7 @@
 #include "core/UiElement.hpp"
 #include "core/Component.hpp"
 #include "core/PixelModel.hpp"
+#include "core/PixelDraw.hpp"
 #include "components/TransformComponent.hpp"
 
 #ifndef M_PI
@@ -124,6 +125,31 @@ void SceneElementItem::RefreshFromComponents()
     for (auto* comp : comps)
         comp->Update(*this, newRect, parentRect);
 
+    // Size snaps HERE, after every component Update, and nowhere else.
+    //
+    // Not inside TransformComponent::Update: that runs at UpdateOrder 1 while
+    // the layout containers and Slot run at 100, so a snap there would be
+    // silently discarded for every layout child and every slot.
+    //
+    // And not inside paint(): boundingRect() returns localRect verbatim, so a
+    // rect that is snapped only at paint time is larger than what the scene
+    // invalidates and hit-tests - which shows up as drag trails and as clicks
+    // missing the outermost row. Snapping localRect itself keeps them equal.
+    bool ownsLayout = false;
+
+    for (auto* comp : comps)
+    {
+        if (comp->IsLayout())
+        {
+            ownsLayout = true;
+            break;
+        }
+    }
+
+    if (PixelModel::PixelSnap())
+        newRect.setSize(QSizeF(PixelDraw::SnapLength(newRect.width()),
+                               PixelDraw::SnapLength(newRect.height())));
+
     // Apply anchor-based positioning using the FINAL rect size after all component Updates
     // have settled. Doing this here (rather than inside TransformComponent::Update) ensures
     // the anchor math agrees with itemChange::ItemPositionHasChanged, which always uses the
@@ -155,6 +181,24 @@ void SceneElementItem::RefreshFromComponents()
                                                      parentRect, newRect.width(), newRect.height());
 
             setPosFromComponent(PixelModel::SnapPoint(resolved));
+        }
+
+        // Write the snapped size back to the document, so the scale gizmo, the
+        // property panel and the rendered element all agree on one number.
+        // Without this the handle sits up to half a unit off the rendered edge
+        // and the panel reports a value the viewport ignores.
+        //
+        // Only for the plain case: a layout container sizes itself by
+        // shrink-wrapping its children, and a layout child is sized by its
+        // parent, so writing back there would fight whoever owns the size.
+        // SetScale early-returns on an equal value, so this converges after one
+        // pass rather than looping.
+        if (PixelModel::PixelSnap() && !parentHasLayout && !ownsLayout && !element->IsSlot())
+        {
+            const QPointF snappedSize(newRect.width(), newRect.height());
+
+            if (xform->GetScale() != snappedSize)
+                xform->SetScale(snappedSize);
         }
 
         setTransformOriginPoint(newRect.center());

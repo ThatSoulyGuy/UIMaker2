@@ -1,4 +1,7 @@
 #include "components/SpriteComponent.hpp"
+#include "core/PixelDraw.hpp"
+#include "core/SpriteSidecar.hpp"
+#include "core/PixelModel.hpp"
 
 #include <QColor>
 #include <QPainter>
@@ -32,7 +35,7 @@ void SpriteComponent::Update(SceneElementItem& item, QRectF& rect, const QRectF&
 bool SpriteComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, !PixelModel::PixelSnap());
 
     if (!m_pixmap.isNull() && m_columns > 0)
     {
@@ -41,7 +44,12 @@ bool SpriteComponent::Paint(QPainter* painter, const QRectF& rect, bool selected
         int row = frame / m_columns;
 
         QRectF srcRect(col * m_frameWidth, row * m_frameHeight, m_frameWidth, m_frameHeight);
-        painter->drawPixmap(rect, m_pixmap, srcRect);
+        // A sprite sheet already selects a sub-frame, so the frame IS the
+        // texture as far as wrapping is concerned.
+        PixelDraw::DrawTexture(painter, rect, m_pixmap.copy(srcRect.toRect()),
+                               SpriteSidecar::MetaFor(m_imagePath).slice,
+                               tex.anchor, tex.cropOffsetX, tex.cropOffsetY,
+                               static_cast<PixelDraw::Fill>(tex.fill));
     }
     else
     {
@@ -120,6 +128,10 @@ void SpriteComponent::ToJson(QJsonObject& out) const
     out["columns"] = m_columns;
     out["assetDomain"] = m_assetDomain;
     out["assetRegistryValue"] = m_assetRegistryValue;
+    out["textureFill"] = tex.fill;
+    out["cropAnchor"] = tex.anchor;
+    out["cropOffsetX"] = tex.cropOffsetX;
+    out["cropOffsetY"] = tex.cropOffsetY;
 }
 
 void SpriteComponent::FromJson(const QJsonObject& in)
@@ -132,4 +144,46 @@ void SpriteComponent::FromJson(const QJsonObject& in)
     SetColumns(in["columns"].toInt(1));
     SetAssetDomain(in["assetDomain"].toString());
     SetAssetRegistryValue(in["assetRegistryValue"].toString());
+    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillStretch));
+    SetCropAnchor(in["cropAnchor"].toInt(PixelDraw::Center));
+    SetCropOffsetX(in["cropOffsetX"].toInt(0));
+    SetCropOffsetY(in["cropOffsetY"].toInt(0));
+}
+
+int SpriteComponent::GetTextureFill() const noexcept { return tex.fill; }
+
+void SpriteComponent::SetTextureFill(int v)
+{
+    const int c = PixelDraw::ClampFill(v);
+    if (tex.fill == c) return;
+    tex.fill = c;
+    NotifyChanged();
+}
+
+int SpriteComponent::GetCropAnchor() const noexcept { return tex.anchor; }
+
+void SpriteComponent::SetCropAnchor(int v)
+{
+    const int c = PixelDraw::ClampAnchor(v);
+    if (tex.anchor == c) return;
+    tex.anchor = c;
+    NotifyChanged();
+}
+
+int SpriteComponent::GetCropOffsetX() const noexcept { return tex.cropOffsetX; }
+
+void SpriteComponent::SetCropOffsetX(int v)
+{
+    if (tex.cropOffsetX == v) return;
+    tex.cropOffsetX = v;
+    NotifyChanged();
+}
+
+int SpriteComponent::GetCropOffsetY() const noexcept { return tex.cropOffsetY; }
+
+void SpriteComponent::SetCropOffsetY(int v)
+{
+    if (tex.cropOffsetY == v) return;
+    tex.cropOffsetY = v;
+    NotifyChanged();
 }

@@ -1,4 +1,6 @@
 #include "components/ToggleComponent.hpp"
+#include "core/PixelDraw.hpp"
+#include "core/PixelModel.hpp"
 
 #include <QPainter>
 #include <QPen>
@@ -43,7 +45,7 @@ void ToggleComponent::Update(SceneElementItem& item, QRectF& rect, const QRectF&
 bool ToggleComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::Antialiasing, !PixelModel::PixelSnap());
 
     double trackW = 48.0;
     double trackH = 24.0;
@@ -54,7 +56,7 @@ bool ToggleComponent::Paint(QPainter* painter, const QRectF& rect, bool selected
 
     painter->setPen(Qt::NoPen);
     painter->setBrush(m_checked ? m_onColor : m_offColor);
-    painter->drawRoundedRect(trackRect, radius, radius);
+    painter->drawRoundedRect(trackRect, PixelDraw::Radius(radius), PixelDraw::Radius(radius));
 
     double knobRadius = trackH * 0.4;
     double knobX = m_checked ? (trackRect.right() - radius) : (trackRect.left() + radius);

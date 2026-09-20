@@ -1,4 +1,6 @@
 #include "components/DropdownComponent.hpp"
+#include "core/PixelDraw.hpp"
+#include "core/PixelModel.hpp"
 
 #include <algorithm>
 
@@ -48,13 +50,13 @@ void DropdownComponent::Update(SceneElementItem& item, QRectF& rect, const QRect
 bool DropdownComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::Antialiasing, !PixelModel::PixelSnap());
 
     QPen borderPen(m_borderColor, 1);
     borderPen.setCosmetic(true);
     painter->setPen(borderPen);
     painter->setBrush(m_backgroundColor);
-    painter->drawRoundedRect(rect, 4.0, 4.0);
+    painter->drawRoundedRect(rect, PixelDraw::Radius(4.0), PixelDraw::Radius(4.0));
 
     QFont font(m_fontFamily);
     font.setPixelSize(m_pixelSize);
@@ -85,7 +87,7 @@ bool DropdownComponent::Paint(QPainter* painter, const QRectF& rect, bool select
         selPen.setCosmetic(true);
         painter->setPen(selPen);
         painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(rect, 4.0, 4.0);
+        painter->drawRoundedRect(rect, PixelDraw::Radius(4.0), PixelDraw::Radius(4.0));
     }
 
     painter->restore();

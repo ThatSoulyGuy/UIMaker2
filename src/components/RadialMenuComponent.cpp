@@ -1,4 +1,5 @@
 #include "components/RadialMenuComponent.hpp"
+#include "core/PixelModel.hpp"
 
 #include <algorithm>
 
@@ -37,7 +38,7 @@ void RadialMenuComponent::Update(SceneElementItem& item, QRectF& rect, const QRe
 bool RadialMenuComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 {
     painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::Antialiasing, !PixelModel::PixelSnap());
 
     QPointF center = rect.center();
     int count = std::max(2, m_sliceCount);
