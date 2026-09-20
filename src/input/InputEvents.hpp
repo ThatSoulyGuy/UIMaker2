@@ -23,8 +23,22 @@ struct WheelEvent
 {
     QPoint viewPos;
     QPointF scenePos;
+
+    // Kept for existing callers: angleDelta.y(), or .x() for a horizontal-only
+    // wheel. On its own it cannot distinguish a trackpad swipe from a wheel
+    // click, which is why the fields below exist.
     int delta = 0;
     Qt::Orientation orientation = Qt::Vertical;
+
+    // Raw deltas. pixelDelta is non-null only for high-resolution devices -
+    // trackpads and precision mice - where it is the correct thing to scroll by.
+    QPoint angleDelta;
+    QPoint pixelDelta;
+
+    // True when the event came from a trackpad/precision device, i.e. the user
+    // is swiping to scroll rather than clicking a wheel detent.
+    bool fromTrackpad = false;
+
     Qt::KeyboardModifiers modifiers = Qt::NoModifier;
 };
 

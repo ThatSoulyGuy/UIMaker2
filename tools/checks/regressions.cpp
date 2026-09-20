@@ -1,6 +1,7 @@
 // Regression checks for defects that were fixed and must stay fixed. Each one
 // is here because it was either a crash, a data-loss path, or a behaviour the
 // plan's later stages depend on.
+#include "app/MainWindow.hpp"
 #include "scene/SceneDocument.hpp"
 #include "scene/UiBinReader.hpp"
 #include "scene/UiBinCommon.hpp"
@@ -12,6 +13,8 @@
 #include "input/EditorContext.hpp"
 #include "input/InputEvents.hpp"
 #include "gizmos/GizmoManager.hpp"
+#include "input/PanZoomHandler.hpp"
+#include <QScrollBar>
 #include "scene/SceneElementItem.hpp"
 #include "core/GridSnap.hpp"
 #include <QGraphicsView>
@@ -28,6 +31,8 @@
 #include "input/EditorContext.hpp"
 #include "input/InputEvents.hpp"
 #include "gizmos/GizmoManager.hpp"
+#include "input/PanZoomHandler.hpp"
+#include <QScrollBar>
 #include "scene/SceneElementItem.hpp"
 #include "core/GridSnap.hpp"
 #include <QGraphicsView>
@@ -87,7 +92,58 @@ void CheckRegressions()
 {
 
 
+    std::fprintf(stderr, "application shutdown (the reported crash on quit)\n");
+    {
+        // A shutdown smoke test, NOT a regression test for the quit crash.
+        // Verified: with the teardown guard removed this still passes, because
+        // the offscreen platform does not reproduce the Cocoa teardown ordering
+        // that segfaults on a real window. The check immediately below - that
+        // destruction emits no SelectionChanged - is the one that actually pins
+        // the regression; it fails without the guard.
+        //
+        // QSettings here uses this binary's (empty) org/app identity, so it
+        // neither reads nor writes the user's real preferences.
+        auto* w = new MainWindow();
+        w->show();            // the crash needs a realised viewport
+        Settle();
+
+        delete w;
+        Settle();
+
+        check(true, "constructing and destroying MainWindow does not crash");
+    }
+
     std::fprintf(stderr, "SceneDocument teardown order\n");
+    {
+        // The quit crash: removeItem() during destruction deselects the item,
+        // QGraphicsScene emits selectionChanged, SceneDocument re-emits
+        // SelectionChanged, and whatever is connected runs against a half-torn-
+        // down window. Reproducing it REQUIRES a live listener - the first
+        // version of this check had none, which is exactly why it passed while
+        // the app segfaulted on exit.
+        auto* doc = new SceneDocument();
+        UiElement* panel = doc->CreatePanelElement("Panel", nullptr);
+        doc->CreateTextElement("Text", panel);
+        doc->SetSelected(panel);
+        Settle();
+
+        int emittedDuringTeardown = 0;
+        bool tearingDown = false;
+
+        QObject::connect(doc, &SceneDocument::SelectionChanged,
+                         [&](const QList<UiElement*>&)
+                         {
+                             if (tearingDown)
+                                 ++emittedDuringTeardown;
+                         });
+
+        tearingDown = true;
+        delete doc;
+
+        check(emittedDuringTeardown == 0,
+              "destruction emits no SelectionChanged (the segfault-on-quit path)");
+    }
+
     {
         auto* doc = new SceneDocument();
         UiElement* panel = doc->CreatePanelElement("Panel", nullptr);
@@ -309,6 +365,94 @@ void CheckRegressions()
         model.setData(idx, QStringLiteral("FromTree"), Qt::EditRole);
         check(asked.count() == 1, "setData emits RenameRequested instead of renaming directly");
         check(panel->GetName() == "Panel", "so the model itself no longer mutates the document");
+    }
+
+    std::fprintf(stderr, "trackpad scrolls, wheel zooms\n");
+    {
+        SceneDocument doc;
+        doc.CreatePanelElement("P", nullptr);
+        Settle();
+
+        QGraphicsView view(doc.GetScene());
+        view.resize(900, 600);
+        view.setTransform(QTransform::fromScale(1.0, 1.0));
+        view.centerOn(doc.GetCanvasRect().center());
+
+        PanZoomHandler pz;
+        EditorContext ctx; ctx.document = &doc; ctx.view = &view;
+
+        auto zoom = [&]{ return view.transform().m11(); };
+        auto scrollPos = [&]{ return QPoint(view.horizontalScrollBar()->value(),
+                                            view.verticalScrollBar()->value()); };
+
+        // A two-finger trackpad swipe must PAN, not zoom. Previously every wheel
+        // event zoomed, which is what made scrolling a jittery mess.
+        {
+            const double z0 = zoom();
+            const QPoint s0 = scrollPos();
+
+            WheelEvent e;
+            e.viewPos = QPoint(450, 300);
+            e.pixelDelta = QPoint(0, 40);
+            e.angleDelta = QPoint(0, 0);
+            e.fromTrackpad = true;
+
+            const InputResult r = pz.HandleWheel(e, ctx);
+
+            check(r.consumed, "a trackpad swipe is handled");
+            check(qFuzzyCompare(zoom(), z0), "and does NOT change the zoom");
+            check(scrollPos() != s0, "it scrolls the view instead");
+        }
+
+        // Horizontal-only swipe must scroll horizontally. This used to have
+        // angleDelta.y()==0, so delta was 0 and it fell through entirely.
+        {
+            const QPoint s0 = scrollPos();
+
+            WheelEvent e;
+            e.viewPos = QPoint(450, 300);
+            e.pixelDelta = QPoint(55, 0);
+            e.fromTrackpad = true;
+
+            check(pz.HandleWheel(e, ctx).consumed, "a horizontal swipe is handled");
+            check(scrollPos().x() != s0.x(), "and scrolls horizontally");
+        }
+
+        // A mouse wheel detent still zooms.
+        {
+            const double z0 = zoom();
+
+            WheelEvent e;
+            e.viewPos = QPoint(450, 300);
+            e.angleDelta = QPoint(0, 120);
+            e.delta = 120;
+            e.fromTrackpad = false;
+
+            check(pz.HandleWheel(e, ctx).consumed, "a wheel detent is handled");
+            check(zoom() > z0, "and zooms in");
+        }
+
+        // Ctrl/Cmd + trackpad zooms, so pinch-style zoom still works on a laptop.
+        {
+            const double z0 = zoom();
+
+            WheelEvent e;
+            e.viewPos = QPoint(450, 300);
+            e.pixelDelta = QPoint(0, 30);
+            e.angleDelta = QPoint(0, 30);
+            e.fromTrackpad = true;
+            e.modifiers = Qt::ControlModifier;
+
+            check(pz.HandleWheel(e, ctx).consumed, "ctrl + trackpad is handled");
+            check(zoom() > z0, "and zooms rather than scrolling");
+        }
+
+        // Pinch.
+        {
+            const double z0 = zoom();
+            check(pz.HandlePinch(QPoint(450, 300), 0.10, ctx).consumed, "a pinch is handled");
+            check(zoom() > z0, "and zooms in");
+        }
     }
 
     std::fprintf(stderr, "structure batching preserves geometry and linearises load (stage 7)\n");

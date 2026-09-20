@@ -83,6 +83,31 @@ QRectF SceneDocument::GetCanvasRect() const noexcept
 
 SceneDocument::~SceneDocument()
 {
+    // Go silent BEFORE touching anything. removeItem() below deselects the item,
+    // which makes QGraphicsScene emit selectionChanged -> OnSceneSelectionChanged
+    // -> SelectionChanged -> MainWindow's handler, which calls
+    // m_viewport->viewport()->update() on a window that is already being torn
+    // down. That is a segfault on quit, and it is only reachable when something
+    // is actually connected - so it needs the disconnect, not just a guard flag.
+    blockSignals(true);
+    m_syncingSelection = true;
+
+    // blockSignals only silences OUTGOING signals. Every element's
+    // StructureChanged targets this document, and those fire while the tree is
+    // being dismantled; pinning the suspend counter makes OnStructureChanged an
+    // unconditional no-op. Deliberately not a StructureBatch - that would flush
+    // on scope exit, which is the one thing we must not do here.
+    m_structureSuspend = 1;
+
+    if (scene)
+        QObject::disconnect(scene, nullptr, this, nullptr);
+
+    QObject::disconnect(m_rootStructureConn);
+    QObject::disconnect(m_sceneRectConn);
+
+    if (root)
+        QObject::disconnect(root, nullptr, this, nullptr);
+
     // Order matters. The QGraphicsScene is a QObject child of this document, so
     // it (and every SceneElementItem in it) would otherwise be destroyed AFTER
     // this body runs - with each item still holding a raw UiElement* into the

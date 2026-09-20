@@ -20,6 +20,10 @@ public:
     InputResult HandleRelease(const MouseReleaseEvent& event, EditorContext& ctx) override;
     InputResult HandleWheel(const WheelEvent& event, EditorContext& ctx) override;
 
+    // Pinch-to-zoom, fed from ViewportWidget's NativeGesture handling.
+    // scaleFactor is the incremental fraction macOS reports (+0.01 = 1% bigger).
+    InputResult HandlePinch(const QPoint& viewPos, double scaleFactor, EditorContext& ctx);
+
     bool IsPanning() const noexcept;
 
 private:

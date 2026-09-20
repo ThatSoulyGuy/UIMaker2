@@ -44,6 +44,10 @@ public:
 
     InputResult HandleInput(const WheelEvent& event, EditorContext& ctx);
 
+    // Exposed so ViewportWidget can route macOS pinch gestures, which arrive as
+    // QEvent::NativeGesture rather than as wheel events.
+    PanZoomHandler* GetPanZoomHandler() const noexcept;
+
     bool IsTransforming() const;
 
     bool IsPanning() const;

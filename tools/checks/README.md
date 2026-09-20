@@ -8,6 +8,10 @@ Assertions over the real types. **Not built by default** — the target is
 
 Exit code is the failure count, so it drops into a git hook or CI unchanged.
 
+Note the target is `EXCLUDE_FROM_ALL`: a plain `make` does **not** rebuild it.
+Always name the target, or you will run a stale binary against fresh sources and
+believe the wrong result.
+
 ## What is here, and why only this
 
 `checks.cpp` — three invariants, each guarding something that has already

@@ -119,6 +119,11 @@ InputResult ToolManager::HandleInput(const WheelEvent& event, EditorContext& ctx
     return m_panZoomHandler->HandleWheel(event, ctx);
 }
 
+PanZoomHandler* ToolManager::GetPanZoomHandler() const noexcept
+{
+    return m_panZoomHandler;
+}
+
 bool ToolManager::IsTransforming() const
 {
     return m_transformHandler->IsTransforming();

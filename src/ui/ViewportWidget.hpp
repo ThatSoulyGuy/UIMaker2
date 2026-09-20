@@ -66,6 +66,10 @@ protected:
 
     void paintEvent(QPaintEvent* event) override;
 
+    // macOS delivers pinch-to-zoom as QEvent::NativeGesture, which has no
+    // dedicated virtual on QWidget.
+    bool event(QEvent* e) override;
+
     void mousePressEvent(QMouseEvent* event) override;
 
     void mouseMoveEvent(QMouseEvent* event) override;
@@ -101,6 +105,22 @@ private:
     // Builds m_gridTile for this zoom/dpr if it is not already current.
     // Returns false when the grid should not be drawn at all (dots too dense).
     bool EnsureGridTile(double zoom, double dpr);
+
+    // Cached snapping-grid tile. The snap grid is a uniform subdivision of the
+    // canvas, so it is periodic and tiles exactly like the dot grid - which
+    // matters because drawing its lines individually cost 16-21 ms per repaint
+    // at a fine division count.
+    QPixmap m_snapTile;
+    double  m_snapZoom = 0.0;
+    double  m_snapDpr  = 0.0;
+    double  m_snapCellW = 0.0;   // logical px, inside the tile
+    double  m_snapCellH = 0.0;
+    int     m_snapTileW = 0;
+    int     m_snapTileH = 0;
+    int     m_snapDivX  = 0;
+    int     m_snapDivY  = 0;
+
+    bool EnsureSnapTile(double cellW, double cellH, double zoom, double dpr, int divX, int divY);
 
 };
 

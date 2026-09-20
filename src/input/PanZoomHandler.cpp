@@ -59,16 +59,54 @@ InputResult PanZoomHandler::HandleRelease(const MouseReleaseEvent& event, Editor
 
 InputResult PanZoomHandler::HandleWheel(const WheelEvent& event, EditorContext& ctx)
 {
-    if (event.delta != 0 && ctx.view)
-    {
-        const double factor = std::pow(1.0015, static_cast<double>(event.delta));
+    if (!ctx.view)
+        return InputResult::NotConsumed();
 
-        ZoomAt(ctx.view, event.viewPos, factor);
+    // Ctrl/Cmd + anything means zoom, on every device.
+    const bool zoomModifier = event.modifiers & (Qt::ControlModifier | Qt::MetaModifier);
+
+    // A trackpad swipe scrolls the canvas; a wheel detent zooms. Previously
+    // EVERY wheel event zoomed, so two-finger scrolling on a trackpad zoomed
+    // erratically in and out - and a horizontal-only swipe had angleDelta.y()==0
+    // so it fell through to QGraphicsView and scrolled instead. Two different
+    // responses to one gesture is what made it feel like a jittery mess.
+    if (event.fromTrackpad && !zoomModifier)
+    {
+        // pixelDelta is the device's own precise scroll amount; angleDelta is
+        // the fallback for a precision device that reports no pixels.
+        QPoint d = event.pixelDelta;
+
+        if (d.isNull())
+            d = event.angleDelta / 8;   // degrees -> approximate pixels
+
+        if (d.isNull())
+            return InputResult::NotConsumed();
+
+        ctx.view->horizontalScrollBar()->setValue(ctx.view->horizontalScrollBar()->value() - d.x());
+        ctx.view->verticalScrollBar()->setValue(ctx.view->verticalScrollBar()->value() - d.y());
 
         return InputResult::Consumed(Qt::ArrowCursor, true);
     }
 
-    return InputResult::NotConsumed();
+    const int delta = event.angleDelta.y() != 0 ? event.angleDelta.y() : event.angleDelta.x();
+
+    if (delta == 0)
+        return InputResult::NotConsumed();
+
+    ZoomAt(ctx.view, event.viewPos, std::pow(1.0015, static_cast<double>(delta)));
+
+    return InputResult::Consumed(Qt::ArrowCursor, true);
+}
+
+InputResult PanZoomHandler::HandlePinch(const QPoint& viewPos, double scaleFactor, EditorContext& ctx)
+{
+    if (!ctx.view || scaleFactor <= 0.0)
+        return InputResult::NotConsumed();
+
+    // macOS reports pinch as an incremental fraction (+0.01 = 1% bigger).
+    ZoomAt(ctx.view, viewPos, 1.0 + scaleFactor);
+
+    return InputResult::Consumed(Qt::ArrowCursor, true);
 }
 
 bool PanZoomHandler::IsPanning() const noexcept
