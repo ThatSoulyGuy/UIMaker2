@@ -41,6 +41,8 @@ set(UIMAKER_SOURCES
     src/core/GridSnap.cpp
     src/core/PixelModel.hpp
     src/core/PixelModel.cpp
+    src/core/PixelDraw.hpp
+    src/core/PixelDraw.cpp
 
     # Components
     src/components/TransformComponent.hpp
@@ -171,6 +173,7 @@ qt_add_executable(UIMaker2Checks
     tools/checks/checks.cpp
     tools/checks/checks.hpp
     tools/checks/regressions.cpp
+    tools/checks/pixelspans.cpp
     ${UIMAKER_SOURCES}
 )
 

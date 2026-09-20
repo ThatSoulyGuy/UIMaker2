@@ -17,6 +17,7 @@
 #include <QScrollBar>
 #include "scene/SceneElementItem.hpp"
 #include "core/GridSnap.hpp"
+#include "core/PixelModel.hpp"
 #include <QGraphicsView>
 #include <QSignalSpy>
 #include <QElapsedTimer>
@@ -35,6 +36,7 @@
 #include <QScrollBar>
 #include "scene/SceneElementItem.hpp"
 #include "core/GridSnap.hpp"
+#include "core/PixelModel.hpp"
 #include <QGraphicsView>
 #include <QSignalSpy>
 #include <QElapsedTimer>
@@ -365,6 +367,46 @@ void CheckRegressions()
         model.setData(idx, QStringLiteral("FromTree"), Qt::EditRole);
         check(asked.count() == 1, "setData emits RenameRequested instead of renaming directly");
         check(panel->GetName() == "Panel", "so the model itself no longer mutates the document");
+    }
+
+    std::fprintf(stderr, "the snap grid is square in PixelGrid mode\n");
+    {
+        const QRectF canvas(0.0, 0.0, 1920.0, 1080.0);
+
+        // Continuous: the X/Y division counts still apply, and a 16:9 canvas
+        // split 320x240 legitimately gives non-square cells.
+        PixelModel::SetMode(PixelModel::Mode::Continuous);
+        GridSnap::SetEnabled(true);
+        GridSnap::SetDivisions(320, 240);
+
+        const QSizeF cont = GridSnap::CellSize(canvas);
+        check(!GridSnap::DrivenByPixelModel(), "Continuous mode uses the division counts");
+        check(qFuzzyCompare(cont.width(), 6.0) && qFuzzyCompare(cont.height(), 4.5),
+              "which on a 16:9 canvas at 320x240 gives the old 6.0 x 4.5 cell");
+
+        // PixelGrid: the cell IS the virtual pixel, so it is square whatever the
+        // division counts say.
+        PixelModel::SetMode(PixelModel::Mode::PixelGrid);
+        PixelModel::SetUnit(6.0);
+
+        const QSizeF px = GridSnap::CellSize(canvas);
+        check(GridSnap::DrivenByPixelModel(), "PixelGrid mode drives the cell from the unit");
+        check(qFuzzyCompare(px.width(), px.height()), "so the cell is SQUARE");
+        check(qFuzzyCompare(px.width(), 6.0), "and equals the unit");
+
+        // A snapped point lands on whole units in both axes.
+        const QPointF snapped = GridSnap::Snap(QPointF(103.0, 47.0), canvas);
+        check(qFuzzyCompare(snapped.x(), 102.0) && qFuzzyCompare(snapped.y(), 48.0),
+              "and snapping lands on whole virtual pixels on both axes");
+
+        // A non-integer unit still yields a square cell.
+        PixelModel::SetUnit(4.5);
+        const QSizeF odd = GridSnap::CellSize(canvas);
+        check(qFuzzyCompare(odd.width(), odd.height()), "a fractional unit is still square");
+
+        PixelModel::SetMode(PixelModel::Mode::Continuous);
+        PixelModel::SetUnit(1.0);
+        GridSnap::SetEnabled(false);
     }
 
     std::fprintf(stderr, "trackpad scrolls, wheel zooms\n");

@@ -1,5 +1,7 @@
 #include "core/GridSnap.hpp"
 
+#include "core/PixelModel.hpp"
+
 #include <cmath>
 
 // Function-local statics so there is exactly one instance and no static-init
@@ -50,19 +52,41 @@ void GridSnap::SetDivisions(int x, int y)
         DivYRef() = y;
 }
 
-QPointF GridSnap::Snap(const QPointF& p, const QRectF& canvas)
+bool GridSnap::DrivenByPixelModel()
 {
+    return PixelModel::PixelSnap() && PixelModel::GetUnit() > 0.0;
+}
+
+QSizeF GridSnap::CellSize(const QRectF& canvas)
+{
+    if (DrivenByPixelModel())
+    {
+        const double u = PixelModel::GetUnit();
+
+        return QSizeF(u, u);
+    }
+
     const int dx = DivXRef();
     const int dy = DivYRef();
 
-    if (!EnabledRef() || dx <= 0 || dy <= 0 || canvas.width() <= 0.0 || canvas.height() <= 0.0)
+    if (dx <= 0 || dy <= 0 || canvas.width() <= 0.0 || canvas.height() <= 0.0)
+        return QSizeF();
+
+    return QSizeF(canvas.width() / dx, canvas.height() / dy);
+}
+
+QPointF GridSnap::Snap(const QPointF& p, const QRectF& canvas)
+{
+    if (!EnabledRef())
         return p;
 
-    const double cellW = canvas.width() / dx;
-    const double cellH = canvas.height() / dy;
+    const QSizeF cell = CellSize(canvas);
 
-    const double x = canvas.left() + std::round((p.x() - canvas.left()) / cellW) * cellW;
-    const double y = canvas.top() + std::round((p.y() - canvas.top()) / cellH) * cellH;
+    if (cell.width() <= 0.0 || cell.height() <= 0.0)
+        return p;
+
+    const double x = canvas.left() + std::round((p.x() - canvas.left()) / cell.width()) * cell.width();
+    const double y = canvas.top() + std::round((p.y() - canvas.top()) / cell.height()) * cell.height();
 
     return QPointF(x, y);
 }

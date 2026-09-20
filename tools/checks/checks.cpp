@@ -259,6 +259,7 @@ int main(int argc, char** argv)
     CheckRowIndexSpace();
     CheckGeometryChecksum();
     CheckAnchorRoundTrip();
+    CheckPixelSpans();
     CheckRegressions();
 
     std::fprintf(stderr, "\n%s (%d failure%s)\n",

@@ -185,7 +185,7 @@ bool ViewportWidget::EnsureGridTile(double zoom, double dpr)
     return true;
 }
 
-bool ViewportWidget::EnsureSnapTile(double cellW, double cellH, double zoom, double dpr, int divX, int divY)
+bool ViewportWidget::EnsureSnapTile(double cellW, double cellH, double zoom, double dpr)
 {
     const double wPx = cellW * zoom;   // logical px per cell
     const double hPx = cellH * zoom;
@@ -195,7 +195,7 @@ bool ViewportWidget::EnsureSnapTile(double cellW, double cellH, double zoom, dou
 
     if (!m_snapTile.isNull()
         && qFuzzyCompare(m_snapZoom, zoom) && qFuzzyCompare(m_snapDpr, dpr)
-        && m_snapDivX == divX && m_snapDivY == divY)
+        && qFuzzyCompare(m_snapCellSrcW, cellW) && qFuzzyCompare(m_snapCellSrcH, cellH))
     {
         return true;
     }
@@ -241,8 +241,8 @@ bool ViewportWidget::EnsureSnapTile(double cellW, double cellH, double zoom, dou
     m_snapCellH = double(tileH) / ny;
     m_snapTileW = tileW;
     m_snapTileH = tileH;
-    m_snapDivX  = divX;
-    m_snapDivY  = divY;
+    m_snapCellSrcW = cellW;
+    m_snapCellSrcH = cellH;
 
     return true;
 }
@@ -289,20 +289,21 @@ void ViewportWidget::drawBackground(QPainter* painter, const QRectF& rect)
         }
     }
 
-    // Snapping grid overlay: the design canvas divided into DivisionsX by
-    // DivisionsY cells. Drawn in scene coordinates (so it scales/pans with the
-    // canvas) with a cosmetic pen (so the lines stay a crisp 1px at any zoom).
+    // Snapping grid overlay. The cell comes from GridSnap::CellSize, which in
+    // PixelGrid mode is the square virtual pixel and in Continuous mode is the
+    // canvas divided by the X/Y counts - so the overlay always shows exactly
+    // what a drag will snap to.
     if (GridSnap::Enabled() && m_document)
     {
         const QRectF canvas = m_document->GetCanvasRect();
-        const int dx = GridSnap::DivisionsX();
-        const int dy = GridSnap::DivisionsY();
+        const QSizeF cell = GridSnap::CellSize(canvas);
         const double zoom = transform().m11();
 
-        if (dx > 0 && dy > 0 && canvas.width() > 0.0 && canvas.height() > 0.0 && zoom > 0.0)
+        if (cell.width() > 0.0 && cell.height() > 0.0
+            && canvas.width() > 0.0 && canvas.height() > 0.0 && zoom > 0.0)
         {
-            const double cellW = canvas.width() / dx;
-            const double cellH = canvas.height() / dy;
+            const double cellW = cell.width();
+            const double cellH = cell.height();
 
             // Skip only when cells collapse to a sub-pixel wash. The threshold
             // is low enough that a fine grid (e.g. Minecraft's 320x240, whose
@@ -321,7 +322,7 @@ void ViewportWidget::drawBackground(QPainter* painter, const QRectF& rect)
                 const QTransform world = painter->worldTransform();
                 const double dpr = painter->device() ? painter->device()->devicePixelRatioF() : 1.0;
 
-                if (!area.isEmpty() && EnsureSnapTile(cellW, cellH, zoom, dpr, dx, dy))
+                if (!area.isEmpty() && EnsureSnapTile(cellW, cellH, zoom, dpr))
                 {
                     // Blit the periodic tile instead of stroking every division
                     // line. At 320x240 divisions the line-by-line version drew

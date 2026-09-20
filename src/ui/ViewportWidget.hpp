@@ -3,6 +3,7 @@
 
 #include <QGraphicsView>
 #include <QPixmap>
+#include <QSizeF>
 
 #include "scene/TransformDelta.hpp"
 
@@ -117,10 +118,9 @@ private:
     double  m_snapCellH = 0.0;
     int     m_snapTileW = 0;
     int     m_snapTileH = 0;
-    int     m_snapDivX  = 0;
-    int     m_snapDivY  = 0;
-
-    bool EnsureSnapTile(double cellW, double cellH, double zoom, double dpr, int divX, int divY);
+    double  m_snapCellSrcW = 0.0;   // cache key: the scene-unit cell it was built for
+    double  m_snapCellSrcH = 0.0;
+    bool EnsureSnapTile(double cellW, double cellH, double zoom, double dpr);
 
 };
 

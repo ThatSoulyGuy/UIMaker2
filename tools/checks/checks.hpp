@@ -13,5 +13,6 @@ void CheckRowIndexSpace();
 void CheckGeometryChecksum();
 void CheckAnchorRoundTrip();
 void CheckRegressions();
+void CheckPixelSpans();
 
 #endif
