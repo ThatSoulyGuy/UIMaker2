@@ -55,10 +55,8 @@ bool ImageComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 
     // The tinted copy is pixel-identical in size to the source, so slice and
     // crop texel indices are valid against either.
-    const SpriteSidecar::Meta meta = SpriteSidecar::MetaFor(imagePath);
-
     PixelDraw::DrawTexture(painter, rect, drawn,
-                           meta.slice, tex.anchor, tex.cropOffsetX, tex.cropOffsetY,
+                           slice, tex.anchor, tex.cropOffsetX, tex.cropOffsetY,
                            static_cast<PixelDraw::Fill>(tex.fill));
 
     if (selected)
@@ -134,6 +132,7 @@ void ImageComponent::SetImagePath(const QString& v)
     imagePath = v;
 
     ReloadPixmap();
+    AdoptSidecarSlice(imagePath);
 
     NotifyChanged();
 }
@@ -215,6 +214,10 @@ void ImageComponent::ToJson(QJsonObject& out) const
     out["cropAnchor"] = tex.anchor;
     out["cropOffsetX"] = tex.cropOffsetX;
     out["cropOffsetY"] = tex.cropOffsetY;
+    out["sliceLeft"] = slice.left;
+    out["sliceTop"] = slice.top;
+    out["sliceRight"] = slice.right;
+    out["sliceBottom"] = slice.bottom;
 }
 
 void ImageComponent::FromJson(const QJsonObject& in)
@@ -228,6 +231,10 @@ void ImageComponent::FromJson(const QJsonObject& in)
     SetCropAnchor(in["cropAnchor"].toInt(PixelDraw::Center));
     SetCropOffsetX(in["cropOffsetX"].toInt(0));
     SetCropOffsetY(in["cropOffsetY"].toInt(0));
+    SetSliceLeft(in["sliceLeft"].toInt(0));
+    SetSliceTop(in["sliceTop"].toInt(0));
+    SetSliceRight(in["sliceRight"].toInt(0));
+    SetSliceBottom(in["sliceBottom"].toInt(0));
 }
 
 void ImageComponent::ReloadPixmap()
@@ -280,4 +287,28 @@ const QPixmap& ImageComponent::EnsureTintedPixmap()
     tintedPixmapColor = tint;
 
     return tintedPixmap;
+}
+
+int ImageComponent::GetSliceLeft() const noexcept { return slice.left; }
+void ImageComponent::SetSliceLeft(int v) { if (slice.left == qMax(0, v)) return; slice.left = qMax(0, v); NotifyChanged(); }
+
+int ImageComponent::GetSliceTop() const noexcept { return slice.top; }
+void ImageComponent::SetSliceTop(int v) { if (slice.top == qMax(0, v)) return; slice.top = qMax(0, v); NotifyChanged(); }
+
+int ImageComponent::GetSliceRight() const noexcept { return slice.right; }
+void ImageComponent::SetSliceRight(int v) { if (slice.right == qMax(0, v)) return; slice.right = qMax(0, v); NotifyChanged(); }
+
+int ImageComponent::GetSliceBottom() const noexcept { return slice.bottom; }
+void ImageComponent::SetSliceBottom(int v) { if (slice.bottom == qMax(0, v)) return; slice.bottom = qMax(0, v); NotifyChanged(); }
+
+// The sidecar describes the art, so adopting it on assignment makes the
+// properties the single source of truth at paint AND at bake time - the
+// sidecar file is not embedded in a .uibin, so anything only it knows would
+// be lost to the engine.
+void ImageComponent::AdoptSidecarSlice(const QString& path)
+{
+    const SpriteSidecar::Meta meta = SpriteSidecar::MetaFor(path);
+
+    if (meta.hasSlice)
+        slice = meta.slice;
 }

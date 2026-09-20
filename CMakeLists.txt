@@ -47,6 +47,8 @@ set(UIMAKER_SOURCES
     src/core/SpriteSidecar.cpp
 
     # Components
+    src/components/DocumentComponent.hpp
+    src/components/DocumentComponent.cpp
     src/components/TransformComponent.hpp
     src/components/TransformComponent.cpp
     src/components/ImageComponent.hpp

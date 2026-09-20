@@ -112,6 +112,11 @@ public:
     // PixelModel. Called when the rendering model or its unit changes.
     void RelayoutAll();
 
+    // Mirror the live PixelModel into the root's Document component, creating
+    // it if absent. That component is what a .uibin carries to the engine, so
+    // every path that serialises the document MUST call this first.
+    void SyncDocumentComponent() const;
+
     QList<UiElement*> GetSelectedElements() const;
     UiElement* GetPrimarySelection() const;
 
@@ -138,6 +143,12 @@ private:
 
     SceneElementItem* CreateItemFor(UiElement* e);
     void UpdateZValues(UiElement* parent);
+
+    // Bump when a change makes an older scene.json mean something different,
+    // and add the corresponding step to MigrateScene.
+    static constexpr int kSceneVersion = 2;
+
+    void MigrateScene(int fromVersion);
 
     void WireRootConnections();
     void RemoveElementInternal(UiElement* e);

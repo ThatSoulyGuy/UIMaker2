@@ -190,6 +190,12 @@ bool SceneExporter::ExportToFolder(const SceneDocument* doc, const QString& fold
 
 bool SceneExporter::BakeToUiBin(const SceneDocument* doc, const QString& filePath)
 {
+    // Refresh the root's Document component from the live PixelModel. The bake
+    // does not go through ExportJson, so without this an engine would receive
+    // whatever rendering model was last SAVED rather than the current one.
+    if (doc)
+        doc->SyncDocumentComponent();
+
     // Write to a sibling temp file and swap it in only after validation, so a
     // failed bake can never clobber an existing good .uibin at the target path.
     const QString tempPath = filePath + QStringLiteral(".tmp");

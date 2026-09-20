@@ -15,5 +15,7 @@ void CheckAnchorRoundTrip();
 void CheckRegressions();
 void CheckPixelSpans();
 void CheckPixelRaster();
+void CheckDocumentBake();
+void CheckUiBinConformance();
 
 #endif

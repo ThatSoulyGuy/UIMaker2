@@ -9,6 +9,20 @@
 
 #include "core/PixelDraw.hpp"
 #include "core/PixelModel.hpp"
+#include "core/AssetContext.hpp"
+#include "components/DocumentComponent.hpp"
+#include "components/ImageComponent.hpp"
+#include "components/TransformComponent.hpp"
+#include "scene/SceneDocument.hpp"
+#include "scene/SceneExporter.hpp"
+#include "scene/UiBinReader.hpp"
+#include "scene/UiBinCommon.hpp"
+#include "components/ButtonComponent.hpp"
+#include <QDataStream>
+#include <cstring>
+#include "core/UiElement.hpp"
+#include <QTemporaryDir>
+#include <QDir>
 
 #include <QVector>
 #include <QImage>
@@ -375,4 +389,228 @@ void CheckPixelRaster()
 
     PixelModel::SetMode(PixelModel::Mode::Continuous);
     PixelModel::SetUnit(1.0);
+}
+
+
+// ---------------------------------------------------------------------------
+// A.1: the rendering model and the 9-slice insets must survive a BAKE, or an
+// engine cannot reproduce wrap rendering from the file alone. Previously
+// neither did: the model lived only in scene.json and the slice only in a
+// sidecar .xml that is not embedded.
+// ---------------------------------------------------------------------------
+void CheckDocumentBake()
+{
+    std::fprintf(stderr, "6. rendering model and slice survive a bake\n");
+
+    QTemporaryDir tmp;
+    check(tmp.isValid(), "temp project root");
+    AssetContext::SetBaseDir(tmp.path());
+
+    // A tiny texture plus a sidecar describing its slice.
+    {
+        QImage art(16, 16, QImage::Format_ARGB32);
+        art.fill(qRgb(200, 120, 40));
+        art.save(QDir(tmp.path()).filePath("art.png"));
+
+        QFile f(QDir(tmp.path()).filePath("art.xml"));
+        f.open(QIODevice::WriteOnly | QIODevice::Text);
+        f.write("<sprite><slice left=\"2\" top=\"3\" right=\"4\" bottom=\"5\"/></sprite>");
+        f.close();
+    }
+
+    PixelModel::SetMode(PixelModel::Mode::PixelGrid);
+    PixelModel::SetUnit(3.5);
+
+    SceneDocument doc;
+    UiElement* e = doc.CreateImageElement("Art", nullptr);
+    auto* img = e->GetComponent<ImageComponent>();
+    img->SetImagePath("art.png");
+    img->SetTextureFill(PixelDraw::FillWrap);
+    Settle();
+
+    check(img->GetSliceLeft() == 2 && img->GetSliceTop() == 3
+       && img->GetSliceRight() == 4 && img->GetSliceBottom() == 5,
+          "the sidecar slice is adopted into the component's properties");
+
+    const QString out = QDir(tmp.path()).filePath("scene.uibin");
+    check(SceneExporter::BakeToUiBin(&doc, out), "the scene bakes");
+
+    // Decode it back through the reference reader.
+    UiElement* root = nullptr;
+    {
+        QFile f(out);
+        f.open(QIODevice::ReadOnly);
+        root = UiBinReader::Read(f.readAll());
+    }
+
+    check(root != nullptr, "and decodes");
+
+    if (root)
+    {
+        auto* docComp = root->GetComponent<DocumentComponent>();
+        check(docComp != nullptr, "the baked root carries a Document component");
+
+        if (docComp)
+        {
+            check(docComp->GetRenderModel() == 1, "carrying renderModel = PixelGrid");
+            check(qFuzzyCompare(docComp->GetPixelUnit(), 3.5), "and the exact pixel unit");
+        }
+
+        // The image element is the root's only child.
+        UiElement* child = root->ChildElementAt(0);
+        check(child != nullptr, "the image element round-trips");
+
+        if (child)
+        {
+            auto* ri = child->GetComponent<ImageComponent>();
+            check(ri != nullptr, "with its Image component");
+
+            if (ri)
+            {
+                check(ri->GetSliceLeft() == 2 && ri->GetSliceTop() == 3
+                   && ri->GetSliceRight() == 4 && ri->GetSliceBottom() == 5,
+                      "and the 9-slice insets, which the sidecar alone could not deliver");
+                check(ri->GetTextureFill() == PixelDraw::FillWrap, "and the wrap mode");
+            }
+        }
+
+        delete root;
+    }
+
+    PixelModel::SetMode(PixelModel::Mode::Continuous);
+    PixelModel::SetUnit(1.0);
+    AssetContext::SetBaseDir(QString());
+}
+
+
+// ---------------------------------------------------------------------------
+// Appendix A fixes: per-slot asset identity, and the reader conformance rules
+// the spec states but the decoder did not previously enforce.
+// ---------------------------------------------------------------------------
+void CheckUiBinConformance()
+{
+    std::fprintf(stderr, "7. uibin conformance fixes\n");
+
+    // --- A.3: Button's two asset slots keep distinct identities -------------
+    {
+        QTemporaryDir tmp;
+        AssetContext::SetBaseDir(tmp.path());
+
+        {
+            QImage skin(8, 8, QImage::Format_ARGB32);
+            skin.fill(qRgb(90, 90, 110));
+            skin.save(QDir(tmp.path()).filePath("skin.png"));
+
+            QFile f(QDir(tmp.path()).filePath("face.ttf"));
+            f.open(QIODevice::WriteOnly);
+            f.write("not a real font, but non-empty");
+            f.close();
+        }
+
+        SceneDocument doc;
+        UiElement* e = doc.CreateButtonElement("Btn", nullptr);
+        auto* b = e->GetComponent<ButtonComponent>();
+
+        b->SetImagePath("skin.png");
+        b->SetAssetDomain("textures");
+        b->SetAssetRegistryValue("ui/button_skin");
+
+        b->SetFontPath("face.ttf");
+        b->SetFontDomain("fonts");
+        b->SetFontRegistryValue("ui/display_face");
+        Settle();
+
+        const QString out = QDir(tmp.path()).filePath("btn.uibin");
+        check(SceneExporter::BakeToUiBin(&doc, out), "a two-asset Button bakes");
+
+        UiElement* root = nullptr;
+        {
+            QFile f(out);
+            f.open(QIODevice::ReadOnly);
+            root = UiBinReader::Read(f.readAll());
+        }
+        check(root != nullptr, "and decodes");
+
+        if (root)
+        {
+            UiElement* c = root->ChildElementAt(0);
+            auto* rb = c ? c->GetComponent<ButtonComponent>() : nullptr;
+            check(rb != nullptr, "with its Button component");
+
+            if (rb)
+            {
+                // Before the fix, one identity was stamped on BOTH asset
+                // records and the last one applied won, so the font's registry
+                // key came back as the skin's.
+                check(rb->GetAssetDomain() == "textures"
+                   && rb->GetAssetRegistryValue() == "ui/button_skin",
+                      "the skin keeps its own identity");
+                check(rb->GetFontDomain() == "fonts"
+                   && rb->GetFontRegistryValue() == "ui/display_face",
+                      "and the font keeps a DIFFERENT one (A.3)");
+            }
+            delete root;
+        }
+
+        AssetContext::SetBaseDir(QString());
+    }
+
+    // --- Reader conformance -------------------------------------------------
+    // Build a minimal valid file, then corrupt one field at a time.
+    auto makeFile = [](quint16 version, quint32 strOff, quint32 assetOff,
+                       quint32 treeOff, quint32 strCount, quint32 strLen) -> QByteArray
+    {
+        QByteArray body;
+        {
+            QDataStream s(&body, QIODevice::WriteOnly);
+            s.setByteOrder(QDataStream::LittleEndian);
+            s << quint32(strLen);              // one string, length as given
+        }
+
+        QByteArray out;
+        out.append("UIB4", 4);
+        QDataStream h(&out, QIODevice::WriteOnly | QIODevice::Append);
+        h.setByteOrder(QDataStream::LittleEndian);
+        h << version << quint16(0);
+        h << strOff << strCount;
+        h << assetOff << quint32(0);
+        h << treeOff;
+        h << quint32(0);                       // fileSize, patched below
+        while (out.size() < 32) out.append('\0');
+
+        QByteArray masked = body;
+        uibin::Obfuscate(masked.data(), masked.size());
+        out.append(masked);
+
+        const quint32 total = quint32(out.size());
+        std::memcpy(out.data() + 28, &total, 4);
+        return out;
+    };
+
+    {
+        // Wrong version is refused (and now before the demask pass, R3.5).
+        UiElement* r = UiBinReader::Read(makeFile(9, 32, 36, 36, 0, 0));
+        check(r == nullptr, "a wrong version is refused");
+        delete r;
+    }
+    {
+        // strOff must be exactly 32 (R3.8).
+        UiElement* r = UiBinReader::Read(makeFile(4, 33, 36, 36, 0, 0));
+        check(r == nullptr, "a string table that does not start at 32 is refused");
+        delete r;
+    }
+    {
+        // Sections must not run backwards (R3.8).
+        UiElement* r = UiBinReader::Read(makeFile(4, 32, 36, 34, 0, 0));
+        check(r == nullptr, "sections that run backwards are refused");
+        delete r;
+    }
+    {
+        // A string length that stays inside the FILE but overruns its own
+        // SECTION must be refused (R17.1). assetOff is 36, so the single
+        // string's 8 bytes run past it.
+        UiElement* r = UiBinReader::Read(makeFile(4, 32, 36, 36, 1, 8));
+        check(r == nullptr, "a string overrunning its section is refused (R17.1)");
+        delete r;
+    }
 }

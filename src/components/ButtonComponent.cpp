@@ -44,14 +44,9 @@ bool ButtonComponent::Paint(QPainter* painter, const QRectF& rect, bool selected
 
     const QPixmap& skin = !customSkin.isNull() ? customSkin : EnsureDefaultSkin();
 
-    // Slice precedence: a sidecar .xml ships WITH the art and describes that
-    // art, so it wins. The sliceLeft/Top/Right/Bottom properties remain the
-    // fallback for a skin that has no sidecar, and are what the .uibin carries.
-    const SpriteSidecar::Meta meta = SpriteSidecar::MetaFor(imagePath);
-
-    PixelDraw::Slice slice = meta.hasSlice
-        ? meta.slice
-        : PixelDraw::Slice{ sliceLeft, sliceTop, sliceRight, sliceBottom };
+    // The properties are the single source of truth: a sidecar is adopted into
+    // them when the path is set, so what is painted is exactly what is baked.
+    const PixelDraw::Slice slice{ sliceLeft, sliceTop, sliceRight, sliceBottom };
 
     if (tex.fill == PixelDraw::FillWrap)
     {
@@ -135,6 +130,7 @@ void ButtonComponent::SetImagePath(const QString& v)
         if (!loaded.isNull())
             customSkin = loaded;
     }
+    AdoptSidecarSlice(imagePath);
     NotifyChanged();
 }
 
@@ -160,6 +156,8 @@ void ButtonComponent::ToJson(QJsonObject& out) const
     out["assetDomain"] = assetDomain;
     out["assetRegistryValue"] = assetRegistryValue;
     out["imagePath"] = imagePath;
+    out["fontDomain"] = fontDomain;
+    out["fontRegistryValue"] = fontRegistryValue;
     out["sliceLeft"] = sliceLeft;
     out["sliceTop"] = sliceTop;
     out["sliceRight"] = sliceRight;
@@ -181,6 +179,8 @@ void ButtonComponent::FromJson(const QJsonObject& in)
     SetAssetDomain(in["assetDomain"].toString());
     SetAssetRegistryValue(in["assetRegistryValue"].toString());
     SetImagePath(in["imagePath"].toString());
+    SetFontDomain(in["fontDomain"].toString());
+    SetFontRegistryValue(in["fontRegistryValue"].toString());
     SetSliceLeft(in["sliceLeft"].toInt(6));
     SetSliceTop(in["sliceTop"].toInt(6));
     SetSliceRight(in["sliceRight"].toInt(6));
@@ -308,5 +308,36 @@ void ButtonComponent::SetCropOffsetY(int v)
 {
     if (tex.cropOffsetY == v) return;
     tex.cropOffsetY = v;
+    NotifyChanged();
+}
+
+void ButtonComponent::AdoptSidecarSlice(const QString& path)
+{
+    const SpriteSidecar::Meta meta = SpriteSidecar::MetaFor(path);
+
+    if (!meta.hasSlice)
+        return;
+
+    sliceLeft   = meta.slice.left;
+    sliceTop    = meta.slice.top;
+    sliceRight  = meta.slice.right;
+    sliceBottom = meta.slice.bottom;
+}
+
+QString ButtonComponent::GetFontDomain() const noexcept { return fontDomain; }
+
+void ButtonComponent::SetFontDomain(const QString& v)
+{
+    if (fontDomain == v) return;
+    fontDomain = v;
+    NotifyChanged();
+}
+
+QString ButtonComponent::GetFontRegistryValue() const noexcept { return fontRegistryValue; }
+
+void ButtonComponent::SetFontRegistryValue(const QString& v)
+{
+    if (fontRegistryValue == v) return;
+    fontRegistryValue = v;
     NotifyChanged();
 }

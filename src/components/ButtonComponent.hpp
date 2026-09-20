@@ -17,6 +17,12 @@ class ButtonComponent : public Component
     Q_PROPERTY(QString fontFamily READ GetFontFamily WRITE SetFontFamily NOTIFY ComponentChanged)
     Q_PROPERTY(int pixelSize READ GetPixelSize WRITE SetPixelSize NOTIFY ComponentChanged)
     Q_PROPERTY(QString fontPath READ GetFontPath WRITE SetFontPath NOTIFY ComponentChanged)
+
+    // Engine identity for fontPath specifically. Button is the only component
+    // with TWO asset slots, and a single assetDomain/assetRegistryValue pair
+    // cannot describe both: the skin's identity used to overwrite the font's.
+    Q_PROPERTY(QString fontDomain READ GetFontDomain WRITE SetFontDomain NOTIFY ComponentChanged)
+    Q_PROPERTY(QString fontRegistryValue READ GetFontRegistryValue WRITE SetFontRegistryValue NOTIFY ComponentChanged)
     Q_PROPERTY(QString assetDomain READ GetAssetDomain WRITE SetAssetDomain NOTIFY ComponentChanged)
     Q_PROPERTY(QString assetRegistryValue READ GetAssetRegistryValue WRITE SetAssetRegistryValue NOTIFY ComponentChanged)
     Q_PROPERTY(QString imagePath READ GetImagePath WRITE SetImagePath NOTIFY ComponentChanged)
@@ -79,6 +85,16 @@ public:
     void SetSliceRight(int v);
     void SetSliceBottom(int v);
 
+    QString GetFontDomain() const noexcept;
+    void SetFontDomain(const QString& v);
+
+    QString GetFontRegistryValue() const noexcept;
+    void SetFontRegistryValue(const QString& v);
+
+    // See the other textured components: the sidecar describes the art, so it
+    // is adopted into the properties, which are what the engine actually gets.
+    void AdoptSidecarSlice(const QString& path);
+
     void ToJson(QJsonObject& out) const override;
 
     void FromJson(const QJsonObject& in) override;
@@ -119,6 +135,9 @@ private:
     QString assetRegistryValue;
     QString imagePath;
     QPixmap customSkin;
+    QString fontDomain;
+    QString fontRegistryValue;
+
     int sliceLeft   = 6;
     int sliceTop    = 6;
     int sliceRight  = 6;

@@ -25,6 +25,8 @@
 #include "core/PixelModel.hpp"
 #include "scene/SceneElementItem.hpp"
 
+#include "components/DocumentComponent.hpp"
+#include "components/ProgressBarComponent.hpp"
 #include "components/TransformComponent.hpp"
 #include "components/ImageComponent.hpp"
 #include "components/TextComponent.hpp"
@@ -141,6 +143,46 @@ SceneDocument::~SceneDocument()
 
     delete root;
     root = nullptr;
+}
+
+void SceneDocument::MigrateScene(int fromVersion)
+{
+    if (fromVersion >= kSceneVersion || !root)
+        return;
+
+    if (fromVersion < 2)
+    {
+        // ProgressBar.direction used to be Horizontal=0, Vertical=1 - the only
+        // component in the project that ordered it that way. The enum is now
+        // Vertical=0 like the others, so every value stored by an older build
+        // means the opposite of what it now reads as. Flip them.
+        //
+        // Without this, every progress bar in every existing scene would
+        // silently change orientation the first time it was opened.
+        for (UiElement* e : root->findChildren<UiElement*>())
+        {
+            if (auto* pb = e->GetComponent<ProgressBarComponent>())
+            {
+                pb->SetDirection(pb->GetDirection() == ProgressBarComponent::Vertical
+                                     ? ProgressBarComponent::Horizontal
+                                     : ProgressBarComponent::Vertical);
+            }
+        }
+    }
+}
+
+void SceneDocument::SyncDocumentComponent() const
+{
+    if (!root)
+        return;
+
+    auto* doc = root->GetComponent<DocumentComponent>();
+
+    if (!doc)
+        doc = root->AddComponent<DocumentComponent>();
+
+    if (doc)
+        doc->CaptureFromPixelModel();
 }
 
 // Root-scoped connections are re-established on every load (the root is
@@ -532,6 +574,11 @@ void SceneDocument::OnStructureChanged()
 
 QByteArray SceneDocument::ExportJson() const
 {
+    // Refresh the root's Document component from the live PixelModel first, so
+    // the component - which is what a .uibin actually carries - and the legacy
+    // top-level keys below cannot disagree.
+    SyncDocumentComponent();
+
     QJsonObject rootObj;
 
     root->ToJson(rootObj);
@@ -540,6 +587,11 @@ QByteArray SceneDocument::ExportJson() const
     // needs the rendering model to reproduce the editor's layout rounding.
     rootObj["renderModel"] = (PixelModel::GetMode() == PixelModel::Mode::PixelGrid) ? "pixel" : "continuous";
     rootObj["pixelUnit"] = PixelModel::GetUnit();
+
+    // Scene format version, for migrations on load. Absent means version 1.
+    //   1 -> 2  ProgressBar.direction changed from Horizontal=0 to Vertical=0,
+    //           aligning it with every other direction field in the project.
+    rootObj["sceneVersion"] = kSceneVersion;
 
     QJsonDocument doc(rootObj);
 
@@ -599,6 +651,9 @@ bool SceneDocument::LoadJson(const QByteArray& data)
 
     // Restore the document's rendering model before rebuilding the tree, so the
     // elements' first layout pass already rounds (or not) correctly.
+    // A Document component on the root is authoritative when present; the
+    // top-level keys remain the fallback so scenes written before the component
+    // existed still load correctly.
     PixelModel::SetMode(rootObj["renderModel"].toString("continuous") == QLatin1String("pixel")
                         ? PixelModel::Mode::PixelGrid : PixelModel::Mode::Continuous);
     // Reset to the default for a missing OR invalid (<=0) stored unit, so a
@@ -626,6 +681,16 @@ bool SceneDocument::LoadJson(const QByteArray& data)
         for (const QJsonValue& v : rootObj["children"].toArray())
             CreateElementFromJson(v.toObject(), root, /*preserveIds=*/true);
     }
+
+    // Migrate anything the loaded scene version predates. Do this BEFORE the
+    // Document component is applied, so a migration may safely touch the
+    // rendering model too.
+    MigrateScene(rootObj["sceneVersion"].toInt(1));
+
+    // The root's own components were created above; if one of them is a
+    // Document, it is newer and more precise than the legacy top-level keys.
+    if (auto* docComp = root->GetComponent<DocumentComponent>())
+        docComp->ApplyToPixelModel();
 
     WireRootConnections();
     OnStructureChanged();

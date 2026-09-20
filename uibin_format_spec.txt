@@ -411,6 +411,25 @@
   R10.2  The "Path" suffix test is CASE-SENSITIVE. A property named "iconpath"
          is NOT an asset reference and is emitted as a STRING.
 
+10.3  Asset identity is per slot
+
+  A component MAY have more than one asset reference - Button has fontPath and
+  imagePath - and each needs its own engine identity.
+
+  R10.3  For an asset property named "<stem>Path", the identity is taken from
+         the properties "<stem>Domain" and "<stem>RegistryValue" when those
+         exist, and otherwise from the component-wide "assetDomain" and
+         "assetRegistryValue".
+
+         Button therefore carries fontDomain / fontRegistryValue for its font
+         and the component-wide pair for its skin.
+
+  R10.4  PRODUCER MUST NOT emit any property whose name ends in "Domain" or
+         "RegistryValue" as a field. They are folded into the asset record.
+
+  R10.5  CONSUMER applying R9.5 MUST write the identity back to the per-slot
+         properties when they exist, and to the component-wide pair otherwise.
+
 
 --------------------------------------------------------------------------------
   11. Geometry model
@@ -507,7 +526,7 @@
   12. Component catalogue
 --------------------------------------------------------------------------------
 
-  The 22 type names a conforming producer of this version emits. The field
+  The 23 type names a conforming producer of this version emits. The field
   lists below were obtained by baking a scene containing one element of every
   type and decoding the resulting file, so they are what is actually on the
   wire, not a transcription of source.
@@ -524,6 +543,7 @@
   Type name      Role                        Sizes    Notes
   -------------  --------------------------  -------  -----------------------
   Transform      geometry                    -        on every element
+  Document       document settings           -        root element only (12.3)
   Panel          decoration                  no
   Image          texture                     yes
   Text           glyph run                   yes
@@ -569,6 +589,10 @@
     cropAnchor       INT32      4            section 13
     cropOffsetX      INT32      0            section 13
     cropOffsetY      INT32      0            section 13
+    sliceLeft        INT32      0            9-slice inset, texels
+    sliceTop         INT32      0
+    sliceRight       INT32      0
+    sliceBottom      INT32      0
 
   Text
     text             STRING     ""
@@ -585,8 +609,10 @@
     textColor        COLOR      0xFFFFFFFF
     fontFamily       STRING     "Inter"
     pixelSize        INT32      24
-    fontPath         ASSET_REF  0xFFFFFFFF
-    imagePath        ASSET_REF  0xFFFFFFFF   the skin texture
+    fontPath         ASSET_REF  0xFFFFFFFF   identity: fontDomain /
+                                              fontRegistryValue (10.3)
+    imagePath        ASSET_REF  0xFFFFFFFF   the skin texture; identity:
+                                              assetDomain / assetRegistryValue
     sliceLeft        INT32      6            9-slice inset, texels
     sliceTop         INT32      6
     sliceRight       INT32      6
@@ -595,6 +621,10 @@
     cropAnchor       INT32      4
     cropOffsetX      INT32      0
     cropOffsetY      INT32      0
+    sliceLeft        INT32      0
+    sliceTop         INT32      0
+    sliceRight       INT32      0
+    sliceBottom      INT32      0
 
     backgroundColor is NOT painted directly. When imagePath resolves to no
     asset, the reference renderer generates a default skin from it: a vertical
@@ -606,12 +636,11 @@
     fillColor        COLOR      0xFF32C850
     backgroundColor  COLOR      0xFF28282D
     borderColor      COLOR      0xFF50505A
-    direction        INT32      0            0 = Horizontal, 1 = Vertical
+    direction        INT32      0            0 = Vertical, 1 = Horizontal
     cornerRadius     DOUBLE     4.0
 
-    NOTE: ProgressBar.direction is the ONLY direction field in this format
-    whose 0 value means Horizontal. StackLayout, ScrollBox and ListRepeater
-    all use 0 = Vertical. See Appendix A.2.
+    direction matches every other direction field: 0 = Vertical. It formerly
+    meant Horizontal here and nowhere else; see A.2.
 
   Toggle
     checked          BOOL       false
@@ -650,6 +679,10 @@
     cropAnchor       INT32      4
     cropOffsetX      INT32      0
     cropOffsetY      INT32      0
+    sliceLeft        INT32      0
+    sliceTop         INT32      0
+    sliceRight       INT32      0
+    sliceBottom      INT32      0
 
   Sprite
     imagePath        ASSET_REF  0xFFFFFFFF   the sheet
@@ -662,6 +695,10 @@
     cropAnchor       INT32      4
     cropOffsetX      INT32      0
     cropOffsetY      INT32      0
+    sliceLeft        INT32      0
+    sliceTop         INT32      0
+    sliceRight       INT32      0
+    sliceBottom      INT32      0
 
     The sub-frame is column (currentFrame mod columns), row
     (currentFrame div columns), each frameWidth x frameHeight texels. These
@@ -722,6 +759,10 @@
     cropAnchor       INT32      4
     cropOffsetX      INT32      0
     cropOffsetY      INT32      0
+    sliceLeft        INT32      0
+    sliceTop         INT32      0
+    sliceRight       INT32      0
+    sliceBottom      INT32      0
 
   ListRepeater
     itemCount        INT32      5
@@ -756,6 +797,27 @@
     direction        INT32      0            0 = Vertical, 1 = Horizontal
     spacing          DOUBLE     8.0
     padding          DOUBLE     8.0
+
+
+--------------------------------------------------------------------------------
+  12.3  The Document component
+
+  A component of type "Document" MAY appear on the ROOT element. It carries
+  document-level settings that are not properties of any one element.
+
+    renderModel   INT32    0    0 = Continuous, 1 = PixelGrid
+    pixelUnit     DOUBLE   1.0  scene units per virtual pixel
+
+  R12.1  PRODUCER MUST emit a Document component on the root whenever the
+         document uses a rendering model other than the default.
+  R12.2  CONSUMER MUST treat an absent Document component as
+         renderModel = 0, pixelUnit = 1.0.
+  R12.3  CONSUMER MUST treat a pixelUnit <= 0 as 1.0.
+
+  Rationale: the .uibin header is a fixed 32 bytes and extending it would
+  force a version bump that every existing consumer would reject. A component
+  rides the machinery that is already there and is skipped harmlessly by a
+  consumer that does not know it.
 
 
 --------------------------------------------------------------------------------
@@ -869,20 +931,21 @@
 
 13.6  The virtual pixel unit
 
-  R13.4  The `unit` - scene units per virtual pixel - is NOT carried in a
-         version 4 file. A consumer MUST obtain it out of band. See A.1.
+  R13.4  The `unit` is Document.pixelUnit (section 12.3). A consumer MUST use
+         1.0 when no Document component is present.
 
 13.7  The 9-slice source
 
   For Button, the insets come from sliceLeft/sliceTop/sliceRight/sliceBottom.
 
-  R13.5  For Image, Icon, Sprite and DragSlot, a version 4 file carries NO
-         slice. The producer reads it from a sidecar XML file that is NOT
-         embedded in the bake. A consumer MUST treat these textures as
-         unsliced unless it obtains the insets out of band. See A.1.
+  R13.5  Image, Icon, Sprite and DragSlot carry sliceLeft, sliceTop,
+         sliceRight and sliceBottom exactly as Button does. All four default
+         to 0, which means "unsliced".
 
-  The sidecar, for reference, sits beside the image with the extension
-  replaced by .xml:
+  The producer populates them from an authoring-time sidecar XML when the image
+  path is assigned. The sidecar is NOT embedded in the bake - the fields are
+  what reaches the engine. For reference, it sits beside the image with the
+  extension replaced by .xml:
 
       <sprite>
           <slice left="3" top="3" right="3" bottom="4"/>
@@ -1071,37 +1134,40 @@
   Recorded so implementers are not surprised. Each is a candidate for a
   version 5.
 
-A.1  The rendering model is not in the file
+A.1  RESOLVED. The rendering model and the 9-slice insets are now in the file.
 
-  The producer's document-level rendering model - whether geometry is
-  continuous or snapped to a virtual-pixel grid, and the size of that virtual
-  pixel - is written only to the editor's scene.json, never to the .uibin.
-  Neither are the 9-slice insets for Image, Icon, Sprite and DragSlot, which
-  live in a sidecar XML that is not embedded.
+  Formerly the document-level rendering model lived only in the editor's
+  scene.json and the 9-slice insets only in a sidecar XML, so a consumer could
+  not reproduce WRAP rendering from a .uibin alone.
 
-  A consumer therefore CANNOT reproduce WRAP rendering (section 13) from a
-  version 4 file alone; it needs `unit` and, for those four types, the insets.
-  This is the single largest gap in the format and the primary motivation for
-  a version 5.
+  Both are now carried: the rendering model as a "Document" component on the
+  root element (section 12.3) and the insets as sliceLeft/sliceTop/sliceRight/
+  sliceBottom fields on every textured component (section 13.7). No format
+  version bump was needed - both ride the existing component machinery, so a
+  consumer that does not recognise them skips them by payloadLen.
 
-A.2  ProgressBar.direction is inverted relative to every other direction field
+A.2  RESOLVED. ProgressBar.direction now matches every other direction field.
 
-  ProgressBar uses 0 = Horizontal, 1 = Vertical. StackLayout, ScrollBox and
-  ListRepeater use 0 = Vertical, 1 = Horizontal. The producer's own property
-  editor presents all four with a Vertical-first list, so a ProgressBar
-  authored as "Vertical" is baked as Horizontal. Consumers MUST follow the
-  table in 12.2 rather than assuming a shared convention.
+  It was the only component ordering the enum Horizontal = 0, while
+  StackLayout, ScrollBox and ListRepeater all use Vertical = 0 - and the
+  producer's property editor presents all four with a Vertical-first list, so
+  a bar authored as "Vertical" was baked as Horizontal.
 
-A.3  Button carries two asset references but one identity
+  ProgressBar.direction is now Vertical = 0, Horizontal = 1 like the others.
+  scene.json carries a "sceneVersion" key and the producer migrates values
+  written by an older build, so existing scenes keep their appearance. A
+  .uibin is a build artifact and is simply rebaked.
 
-  Button has both fontPath and imagePath, but a component carries a single
-  (assetDomain, assetRegistryValue) pair. The producer stamps that one pair
-  onto BOTH asset records, and a consumer applying R9.5 for each reference in
-  turn ends with whichever was applied last. A button whose skin and font both
-  come from registries cannot express two distinct identities in version 4.
+A.3  RESOLVED. Asset identity is per slot.
 
-  Until this is fixed, a consumer SHOULD prefer the embedded bytes for
-  Button.fontPath rather than the registry identity.
+  Button has both fontPath and imagePath, but a component used to carry a
+  single (assetDomain, assetRegistryValue) pair, which the producer stamped
+  onto BOTH asset records; a consumer applying R9.5 to each reference in turn
+  kept whichever came last, so the font resolved through the skin's key.
+
+  Identity is now per asset slot by the naming convention in 10.3. Button
+  carries fontDomain / fontRegistryValue for fontPath and keeps assetDomain /
+  assetRegistryValue for imagePath.
 
 A.4  The container is int-bounded in practice
 

@@ -101,6 +101,25 @@ namespace
         const QString domain   = comp->property("assetDomain").toString();
         const QString registry = comp->property("assetRegistryValue").toString();
 
+        // Engine identity is per ASSET SLOT, not per component. A component
+        // with two "...Path" properties - Button has fontPath and imagePath -
+        // would otherwise stamp one identity onto both asset records, and a
+        // consumer applying them in turn would keep whichever came last.
+        //
+        // Convention: for a property "xxxPath", the identity is "xxxDomain" and
+        // "xxxRegistryValue" when those exist, else the component-wide
+        // assetDomain / assetRegistryValue.
+        auto identityFor = [&](const QString& pathName, QString& outDomain, QString& outRegistry)
+        {
+            const QString stem = pathName.left(pathName.size() - 4);   // strip "Path"
+
+            const QVariant d = comp->property(QString(stem + "Domain").toLatin1().constData());
+            const QVariant r = comp->property(QString(stem + "RegistryValue").toLatin1().constData());
+
+            outDomain   = d.isValid() ? d.toString() : domain;
+            outRegistry = r.isValid() ? r.toString() : registry;
+        };
+
         for (int i = mo->propertyOffset(); i < mo->propertyCount(); ++i)
         {
             const QMetaProperty p = mo->property(i);
@@ -108,15 +127,22 @@ namespace
 
             // The engine identity is folded into the asset record, not emitted
             // as plain fields.
-            if (name == QLatin1String("assetDomain") || name == QLatin1String("assetRegistryValue"))
+            // Identity properties are folded into the asset record, never
+            // emitted as fields - the component-wide pair and any per-slot
+            // pair alike.
+            if (name.endsWith(QLatin1String("Domain")) || name.endsWith(QLatin1String("RegistryValue")))
                 continue;
 
             w.U32(bake.Intern(name));
 
             if (name.endsWith(QLatin1String("Path")))
             {
+                QString slotDomain;
+                QString slotRegistry;
+                identityFor(name, slotDomain, slotRegistry);
+
                 w.U8(TAG_ASSET_REF);
-                w.U32(bake.RegisterAsset(comp->property(p.name()).toString(), domain, registry));
+                w.U32(bake.RegisterAsset(comp->property(p.name()).toString(), slotDomain, slotRegistry));
                 ++fieldCount;
                 continue;
             }

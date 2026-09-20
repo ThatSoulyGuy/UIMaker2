@@ -28,6 +28,14 @@ class ImageComponent : public Component
     Q_PROPERTY(int cropOffsetX READ GetCropOffsetX WRITE SetCropOffsetX NOTIFY ComponentChanged)
     Q_PROPERTY(int cropOffsetY READ GetCropOffsetY WRITE SetCropOffsetY NOTIFY ComponentChanged)
 
+    // 9-slice insets in TEXELS. Populated from the sidecar .xml when the image
+    // path is set, and editable afterwards. These are what reaches the engine:
+    // the sidecar file itself is not embedded in a bake.
+    Q_PROPERTY(int sliceLeft READ GetSliceLeft WRITE SetSliceLeft NOTIFY ComponentChanged)
+    Q_PROPERTY(int sliceTop READ GetSliceTop WRITE SetSliceTop NOTIFY ComponentChanged)
+    Q_PROPERTY(int sliceRight READ GetSliceRight WRITE SetSliceRight NOTIFY ComponentChanged)
+    Q_PROPERTY(int sliceBottom READ GetSliceBottom WRITE SetSliceBottom NOTIFY ComponentChanged)
+
 public:
 
     explicit ImageComponent(QObject* parent = nullptr);
@@ -79,7 +87,25 @@ public:
     void FromJson(const QJsonObject& in) override;
 
 
+    int GetSliceLeft() const noexcept;
+    void SetSliceLeft(int v);
+
+    int GetSliceTop() const noexcept;
+    void SetSliceTop(int v);
+
+    int GetSliceRight() const noexcept;
+    void SetSliceRight(int v);
+
+    int GetSliceBottom() const noexcept;
+    void SetSliceBottom(int v);
+
+    // Pull the slice from the sidecar next to `path`, if one exists.
+    void AdoptSidecarSlice(const QString& path);
+
 private:
+
+    PixelDraw::Slice slice;
+
 
     void ReloadPixmap();
 

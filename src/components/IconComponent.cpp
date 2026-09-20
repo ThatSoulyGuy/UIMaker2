@@ -49,7 +49,7 @@ bool IconComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
         painter->setOpacity(1.0);
         const QPixmap& drawn = (m_tintColor.isValid() && m_tintColor != QColor(Qt::white)) ? EnsureTintedPixmap() : m_pixmap;
         PixelDraw::DrawTexture(painter, rect, drawn,
-                               SpriteSidecar::MetaFor(m_imagePath).slice,
+                               slice,
                                tex.anchor, tex.cropOffsetX, tex.cropOffsetY,
                                static_cast<PixelDraw::Fill>(tex.fill));
     }
@@ -88,6 +88,7 @@ void IconComponent::SetImagePath(const QString& v)
     if (m_imagePath == v) return;
     m_imagePath = v;
     ReloadPixmap();
+    AdoptSidecarSlice(m_imagePath);
     NotifyChanged();
 }
 
@@ -115,6 +116,10 @@ void IconComponent::ToJson(QJsonObject& out) const
     out["cropAnchor"] = tex.anchor;
     out["cropOffsetX"] = tex.cropOffsetX;
     out["cropOffsetY"] = tex.cropOffsetY;
+    out["sliceLeft"] = slice.left;
+    out["sliceTop"] = slice.top;
+    out["sliceRight"] = slice.right;
+    out["sliceBottom"] = slice.bottom;
 }
 
 void IconComponent::FromJson(const QJsonObject& in)
@@ -128,6 +133,10 @@ void IconComponent::FromJson(const QJsonObject& in)
     SetCropAnchor(in["cropAnchor"].toInt(PixelDraw::Center));
     SetCropOffsetX(in["cropOffsetX"].toInt(0));
     SetCropOffsetY(in["cropOffsetY"].toInt(0));
+    SetSliceLeft(in["sliceLeft"].toInt(0));
+    SetSliceTop(in["sliceTop"].toInt(0));
+    SetSliceRight(in["sliceRight"].toInt(0));
+    SetSliceBottom(in["sliceBottom"].toInt(0));
 }
 
 void IconComponent::ReloadPixmap()
@@ -221,4 +230,28 @@ void IconComponent::SetCropOffsetY(int v)
     if (tex.cropOffsetY == v) return;
     tex.cropOffsetY = v;
     NotifyChanged();
+}
+
+int IconComponent::GetSliceLeft() const noexcept { return slice.left; }
+void IconComponent::SetSliceLeft(int v) { if (slice.left == qMax(0, v)) return; slice.left = qMax(0, v); NotifyChanged(); }
+
+int IconComponent::GetSliceTop() const noexcept { return slice.top; }
+void IconComponent::SetSliceTop(int v) { if (slice.top == qMax(0, v)) return; slice.top = qMax(0, v); NotifyChanged(); }
+
+int IconComponent::GetSliceRight() const noexcept { return slice.right; }
+void IconComponent::SetSliceRight(int v) { if (slice.right == qMax(0, v)) return; slice.right = qMax(0, v); NotifyChanged(); }
+
+int IconComponent::GetSliceBottom() const noexcept { return slice.bottom; }
+void IconComponent::SetSliceBottom(int v) { if (slice.bottom == qMax(0, v)) return; slice.bottom = qMax(0, v); NotifyChanged(); }
+
+// The sidecar describes the art, so adopting it on assignment makes the
+// properties the single source of truth at paint AND at bake time - the
+// sidecar file is not embedded in a .uibin, so anything only it knows would
+// be lost to the engine.
+void IconComponent::AdoptSidecarSlice(const QString& path)
+{
+    const SpriteSidecar::Meta meta = SpriteSidecar::MetaFor(path);
+
+    if (meta.hasSlice)
+        slice = meta.slice;
 }

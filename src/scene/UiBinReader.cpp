@@ -90,8 +90,21 @@ namespace
                 if (assetRef != kNoAsset && assetRef < quint32(ctx.assets.size()))
                 {
                     const AssetRec& a = ctx.assets[int(assetRef)];
-                    comp->setProperty("assetDomain", ctx.Str(a.domainId));
-                    comp->setProperty("assetRegistryValue", ctx.Str(a.registryId));
+
+                    // Identity is per asset SLOT: a component with two
+                    // "...Path" properties keeps them apart. For "xxxPath" try
+                    // "xxxDomain"/"xxxRegistryValue" first, and fall back to the
+                    // component-wide pair. Mirrors UiBinWriter.
+                    const QString stem = name.left(name.size() - 4);
+                    const QByteArray slotDomain = (stem + "Domain").toLatin1();
+                    const QByteArray slotRegistry = (stem + "RegistryValue").toLatin1();
+
+                    const bool perSlot = comp->property(slotDomain.constData()).isValid();
+
+                    comp->setProperty(perSlot ? slotDomain.constData() : "assetDomain",
+                                      ctx.Str(a.domainId));
+                    comp->setProperty(perSlot ? slotRegistry.constData() : "assetRegistryValue",
+                                      ctx.Str(a.registryId));
                 }
                 // The path string itself is deliberately not restored.
             }
@@ -144,17 +157,25 @@ UiElement* UiBinReader::Read(const QByteArray& bytes)
     if (bytes.size() < int(kHeaderSize) || std::memcmp(bytes.constData(), kMagic, 4) != 0)
         return nullptr;
 
-    // Take a writable copy and demask everything after the header. The header
-    // itself was left clear by the writer so we could locate sections and
-    // validate magic/version before doing any work. See uibin::Obfuscate.
+    // Spec R3.5: validate the version BEFORE demasking. The header is written
+    // in the clear precisely so a foreign or future file can be rejected
+    // without paying for a full copy and a full XOR pass over the body.
+    {
+        Reader pre(bytes.constData(), int(bytes.size()));
+        pre.seek(4);
+
+        if (pre.U16() != kVersion || !pre.ok())
+            return nullptr;
+    }
+
     QByteArray buf = bytes;
     Obfuscate(buf.data() + kHeaderSize, buf.size() - int(kHeaderSize));
 
     Reader r(buf.constData(), buf.size());
 
     r.seek(4);
-    const quint16 version = r.U16();
-    r.U16();                                 // flags
+    r.U16();                                 // version, already validated
+    r.U16();                                 // flags: spec R3.6 - ignore every bit
     const quint32 strOff   = r.U32();
     const quint32 strCount = r.U32();
     const quint32 assetOff  = r.U32();
@@ -162,39 +183,58 @@ UiElement* UiBinReader::Read(const QByteArray& bytes)
     const quint32 treeOff   = r.U32();
     const quint32 fileSize  = r.U32();
 
-    if (version != kVersion || !r.ok())
-        return nullptr;
-
-    // The header's total-file-size field is a truncation sanity check (spec
-    // section 3): a mismatch means the file is truncated or corrupt.
-    if (qsizetype(fileSize) != bytes.size())
-        return nullptr;
-
-    Ctx ctx;
-
-    // String table.
-    r.seek(int(strOff));
-    for (quint32 i = 0; i < strCount && r.ok(); ++i)
-    {
-        const quint32 len = r.U32();
-        ctx.strings.push_back(QString::fromUtf8(r.Bytes(int(len))));
-    }
-
-    // Asset table.
-    r.seek(int(assetOff));
-    for (quint32 i = 0; i < assetCount && r.ok(); ++i)
-    {
-        AssetRec a;
-        a.domainId   = r.U32();
-        a.registryId = r.U32();
-        const quint32 dl = r.U32();
-        a.data = r.Bytes(int(dl));
-        ctx.assets.push_back(a);
-    }
-
     if (!r.ok())
         return nullptr;
 
+    // Spec R3.7: the declared size must match reality, which catches truncation.
+    if (qsizetype(fileSize) != bytes.size())
+        return nullptr;
+
+    // Spec R3.8: the sections must start where the format says and must not
+    // overlap or run backwards.
+    if (strOff != kHeaderSize
+        || assetOff < strOff
+        || treeOff < assetOff
+        || qsizetype(treeOff) > bytes.size())
+    {
+        return nullptr;
+    }
+
+    Ctx ctx;
+
+    // String table. Bounded to [strOff, assetOff) per spec R17.1: a string
+    // length that overruns into the asset table is corrupt, even though it
+    // still lies inside the file.
+    Reader strReader(buf.constData(), int(assetOff));
+    strReader.seek(int(strOff));
+
+    for (quint32 i = 0; i < strCount && strReader.ok(); ++i)
+    {
+        const quint32 len = strReader.U32();
+        ctx.strings.push_back(QString::fromUtf8(strReader.Bytes(int(len))));
+    }
+
+    if (!strReader.ok())
+        return nullptr;
+
+    // Asset table, bounded to [assetOff, treeOff).
+    Reader assetReader(buf.constData(), int(treeOff));
+    assetReader.seek(int(assetOff));
+
+    for (quint32 i = 0; i < assetCount && assetReader.ok(); ++i)
+    {
+        AssetRec a;
+        a.domainId   = assetReader.U32();
+        a.registryId = assetReader.U32();
+        const quint32 dl = assetReader.U32();
+        a.data = assetReader.Bytes(int(dl));
+        ctx.assets.push_back(a);
+    }
+
+    if (!assetReader.ok())
+        return nullptr;
+
+    // Element tree: the remainder of the file.
     r.seek(int(treeOff));
     UiElement* root = ReadElement(r, ctx, nullptr);
 

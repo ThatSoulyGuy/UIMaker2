@@ -18,7 +18,11 @@ class ProgressBarComponent : public Component
 
 public:
 
-    enum Direction { Horizontal = 0, Vertical = 1 };
+    // Vertical = 0, matching StackLayout, ScrollBox and ListRepeater and the
+    // property panel's Vertical-first combo. This used to be Horizontal = 0 -
+    // the only component in the project that disagreed - so choosing "Vertical"
+    // in the inspector stored 0 and rendered a HORIZONTAL bar.
+    enum Direction { Vertical = 0, Horizontal = 1 };
 
     explicit ProgressBarComponent(QObject* parent = nullptr);
 
