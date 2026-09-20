@@ -1,349 +1,438 @@
 ================================================================================
-  .uibin File Format Specification  (Version 4)
+  .uibin Binary UI Scene Format
+  Specification Version 4
 ================================================================================
 
-A .uibin file is a self-contained, binary-packed UI scene produced by
-UIMaker2's "Bake" command. It bundles the entire UI element hierarchy together
-with every referenced texture/font asset into one file that a game engine can
-load at runtime with zero external file dependencies.
+  Status:        Stable. Version 4 is the current wire format.
+  Produced by:   UIMaker2, "Bake (.uibin)" command.
+  Encoder:       src/scene/UiBinWriter.cpp
+  Reference
+  decoder:       src/scene/UiBinReader.cpp
+  Primitives:    src/scene/UiBinCommon.{hpp,cpp}
 
-This document is both the byte-level reference AND a usage guide: each section
-gives the exact layout, explains what the part is for, and tells you how to
-consume it. If you are writing an engine-side loader, you can implement it
-top-to-bottom from this file alone.
-
-
---------------------------------------------------------------------------------
-  1. Design goals (why the format looks like this)
---------------------------------------------------------------------------------
-
-  * Opaque and fixed-layout. It is deliberately NOT text/JSON-shaped and not
-    meant to be eyeballed. Every value is found by an explicit offset in the
-    header or by a length prefix - never by scanning for delimiters. This is
-    what makes loading a few memcpy-style reads instead of a parse.
-
-  * Little-endian everywhere. All multi-byte scalars are little-endian, which
-    is native on the target platforms, so reading an integer is a direct load
-    with no byte-swapping. There is no padding or alignment between fields.
-
-  * Strings interned once. Every repeated string (component type names,
-    property names, element names, asset identity) is stored a single time in
-    a string table and referenced by a 4-byte id. The tree itself contains no
-    text, only ids.
-
-  * Engine-facing asset identity is first-class. Each asset carries an
-    abstract (domain, registryValue) pair the engine can resolve through its
-    own asset registry, AND the raw baked bytes as a fallback. The editor's
-    authoring path (the relative imagePath/fontPath/iconPath) is intentionally
-    NOT in the file - it is a tooling concept with no runtime meaning.
-
-  * Forward-skippable. Components are length-prefixed so an older loader can
-    walk past a component type or field tag it does not understand instead of
-    failing.
-
-  * Eyeball-opaque body. Every byte after the 32-byte header is run through a
-    deterministic XOR stream (see section 2a) so a hex dump shows noise -
-    no component names, no PNG/TTF magic bytes, no element names. The header
-    stays in the clear so a loader can locate sections without demasking.
-    This is cosmetic obfuscation, not cryptography: anyone with the spec or
-    the source can decode the file. It exists only to keep baked content
-    from being casually readable.
+  A .uibin file is a self-contained, binary-packed UI scene. It bundles a UI
+  element hierarchy together with every referenced texture and font asset into
+  one file that a game engine loads at runtime with zero external file
+  dependencies.
 
 
 --------------------------------------------------------------------------------
-  2. How a runtime loads a .uibin (the whole procedure)
+  0. Conventions
 --------------------------------------------------------------------------------
 
-  1. Read the 32-byte header. Verify magic == "UIB4" and version == 4. Reject
-     otherwise. Keep the four section offsets and three counts.
-  2. Demask everything from offset 32 to EOF in place (or into a working
-     buffer) using the XOR stream described in section 2a. The header is
-     already in the clear; do NOT demask the first 32 bytes. From this
-     point on, treat the demasked bytes as the file you are parsing.
-  3. Seek to stringTableOffset. Read [stringCount] entries into an array
-     indexed by id (id 0 will be ""). This array is your decode dictionary.
-  4. Seek to assetTableOffset. Read [assetCount] records into an array indexed
-     by asset index. Resolve string ids to get each asset's domain/registry.
-     Either register the embedded bytes with your texture/font system now, or
-     keep them lazily and resolve on first use.
-  5. Seek to treeOffset. Decode exactly one Element (recursive, pre-order).
-     For each component, instantiate it by its type-name string, then apply
-     each field to the instance (see section 7).
-  6. The decoded Element tree is your live UI hierarchy.
+0.1  Normative keywords
 
-Sections never overlap and always appear in this order, but you should always
-trust the header offsets rather than assume adjacency.
+  The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
+  RECOMMENDED, MAY and OPTIONAL in this document are to be interpreted as
+  described in RFC 2119.
+
+  Requirements are addressed to one of two roles, and each requirement names
+  its role:
+
+    PRODUCER   an implementation that writes a .uibin file.
+    CONSUMER   an implementation that reads one.
+
+  A requirement addressed to one role places no obligation on the other. Where
+  the two differ deliberately - the flags word in 3.2 is the clearest example -
+  this document says so explicitly.
+
+0.2  Normative and informative text
+
+  Sections 3 through 17 are NORMATIVE, except where a subsection is marked
+  otherwise. Sections 0 through 2, every passage marked "Rationale", and both
+  appendices are INFORMATIVE: they explain intent and MUST NOT be read as
+  imposing requirements.
+
+0.3  Notation
+
+  u8, u16, u32, u64   unsigned little-endian integers of 8, 16, 32, 64 bits
+  i32, i64            two's-complement little-endian signed integers
+  f64                 IEEE-754 binary64, little-endian
+  bytes[n]            n raw bytes, no framing and no terminator
+
+  All multi-byte scalars are LITTLE-ENDIAN. There is no padding and no
+  alignment requirement between fields; every structure is packed.
+
+  Offsets are absolute byte positions from the start of the file.
+
+0.4  Units
+
+  Coordinates and extents are expressed in SCENE UNITS, a producer-defined
+  abstract unit. The design canvas is 1920 x 1080 scene units. Scene units are
+  not pixels; see section 13 for the relationship between scene units, virtual
+  pixels and texels.
 
 
 --------------------------------------------------------------------------------
-  2a. The XOR mask  (applied to all bytes after the header)
+  1. Design goals (informative)
 --------------------------------------------------------------------------------
 
-  Every byte in the file from offset 32 onwards is XORed with a stream
-  produced by this linear-congruential generator. Writer and reader run the
-  identical routine; XOR is self-inverse so one call encodes and the other
-  decodes.
+  * Opaque and fixed-layout. The format is deliberately not text-shaped. Every
+    value is located by an explicit offset or a length prefix, never by
+    scanning for a delimiter, so loading is a sequence of direct reads rather
+    than a parse.
 
-      uint32 s = 0x5BC8A93D                       // seed (constant)
+  * Little-endian everywhere, matching the target platforms, so reading a
+    scalar is a direct load with no byte swapping.
+
+  * Strings interned once. Every repeated string - component type names,
+    property names, element names, asset identity - is stored a single time in
+    a string table and referenced by a 4-byte id. The element tree contains no
+    text.
+
+  * Engine-facing asset identity is first class. Each asset carries an abstract
+    (domain, registryValue) pair the engine resolves through its own registry,
+    AND the raw baked bytes as a fallback. The producer's authoring path is
+    deliberately absent: it is a tooling concept with no runtime meaning.
+
+  * Forward-skippable. Component records are length-prefixed so a consumer can
+    walk past a component type or field tag it does not understand rather than
+    failing the whole file.
+
+  * Eyeball-opaque body. Everything after the 32-byte header is run through a
+    deterministic XOR stream (section 4) so a hex dump shows noise: no type
+    names, no PNG or TTF magic, no element names. This is COSMETIC
+    OBFUSCATION, NOT ENCRYPTION. Anyone holding this document can decode the
+    file. It exists only to keep baked content from being casually readable.
+
+
+--------------------------------------------------------------------------------
+  2. File structure (informative overview)
+--------------------------------------------------------------------------------
+
+      +--------------------------------------------------+  offset 0
+      |  Header, 32 bytes, NEVER obfuscated               |
+      +--------------------------------------------------+  offset 32
+      |  String table      (stringCount entries)          |  \
+      +--------------------------------------------------+   |
+      |  Asset table       (assetCount entries)           |   > obfuscated
+      +--------------------------------------------------+   |
+      |  Element tree      (exactly one root element)     |  /
+      +--------------------------------------------------+  offset fileSize
+
+  The three sections appear in this order and are contiguous. Their start
+  offsets are carried in the header so a consumer never has to infer them.
+
+
+--------------------------------------------------------------------------------
+  3. Header
+--------------------------------------------------------------------------------
+
+3.1  Layout
+
+  The header occupies the first 32 bytes and is NEVER obfuscated.
+
+  Offset  Size  Type      Field               Value
+  ------  ----  --------  ------------------  ----------------------------------
+  0       4     bytes[4]  magic               ASCII "UIB4" (0x55 0x49 0x42 0x34)
+  4       2     u16       version             4
+  6       2     u16       flags               reserved; see 3.2
+  8       4     u32       stringTableOffset   always 32
+  12      4     u32       stringCount         number of string entries
+  16      4     u32       assetTableOffset    first byte after the string table
+  20      4     u32       assetCount          number of asset records
+  24      4     u32       treeOffset          first byte after the asset table
+  28      4     u32       fileSize            total file size in bytes
+
+  The header carries THREE section offsets, TWO counts and one total size.
+
+3.2  Requirements
+
+  R3.1  PRODUCER MUST write magic exactly "UIB4" and version exactly 4.
+  R3.2  PRODUCER MUST write flags as 0. All bits are reserved.
+  R3.3  CONSUMER MUST reject a file whose magic is not "UIB4".
+  R3.4  CONSUMER MUST reject a file whose version is not 4.
+  R3.5  CONSUMER MUST verify magic and version BEFORE demasking the body, so a
+        foreign or future file is rejected without the cost of a full pass.
+  R3.6  CONSUMER MUST IGNORE every bit of the flags word. A non-zero flags
+        value MUST NOT invalidate the parse.
+
+        Rationale: R3.2 and R3.6 are deliberately asymmetric. Reserving the
+        field while requiring consumers to ignore it is what allows a future
+        version to use those bits without every existing consumer rejecting
+        the file outright.
+
+  R3.7  CONSUMER MUST reject a file whose fileSize does not equal the actual
+        byte length of the file. This catches truncation cheaply.
+  R3.8  CONSUMER SHOULD reject a header whose section offsets are not
+        monotonically increasing, or where stringTableOffset != 32.
+
+
+--------------------------------------------------------------------------------
+  4. Obfuscation stream
+--------------------------------------------------------------------------------
+
+4.1  Algorithm
+
+  Every byte from offset 32 to fileSize-1 inclusive is XORed with a keystream
+  produced by a linear congruential generator seeded with a fixed constant:
+
+      s = 0x5BC8A93D
       for i in 0 .. n-1:
-          s = (s * 1103515245 + 12345) mod 2^32   // glibc rand() LCG
-          data[i] ^= uint8(s >> 16)               // high byte of state
+          s    = (s * 1103515245 + 12345) mod 2^32
+          k    = (s >> 16) and 0xFF
+          b[i] = b[i] XOR k
 
-  The seed is fixed; the stream depends only on byte position within the
-  masked region (offset 0 of the stream = file offset 32). String table,
-  asset table, and element tree are masked as one contiguous run - do NOT
-  reset the generator between sections.
+  The transform is its own inverse: applying it twice restores the original
+  bytes. The keystream depends only on the byte's index within the body, not
+  on its content.
 
-  Why this exists. Without the mask, baked files leak readable property
-  names ("position", "imagePath"), component names ("Transform", "Button"),
-  element names from the editor, and recognisable file signatures inside
-  the asset table (e.g. PNG's "\x89PNG", TTF version bytes). With the mask
-  applied, every byte after the header is indistinguishable from random
-  noise in a hex dump.
+4.2  Requirements
 
-  What this is NOT. It is not encryption. The seed and algorithm are right
-  here; anyone with this document or the source can reverse the mask. The
-  goal is "not casually eyeballable", not secrecy.
+  R4.1  PRODUCER MUST apply the stream to the whole body as ONE contiguous run
+        beginning at offset 32. The three sections are not masked separately.
+  R4.2  CONSUMER MUST demask the same single run before interpreting any body
+        byte.
+  R4.3  Implementations MUST NOT treat this as a security boundary.
 
 
 --------------------------------------------------------------------------------
-  3. Header  (fixed 32 bytes, at offset 0)
+  5. String table
 --------------------------------------------------------------------------------
 
-  Offset  Size  Type    Description
-  ------  ----  ------  ------------------------------------------------------
-  0       4     char[4] Magic bytes: ASCII "UIB4"
-  4       2     u16     Format version (currently 4)
-  6       2     u16     Flags (currently 0; all bits reserved, must be 0)
-  8       4     u32     String table offset  (always 32)
-  12      4     u32     String count
-  16      4     u32     Asset table offset
-  20      4     u32     Asset count
-  24      4     u32     Element tree offset
-  28      4     u32     Total file size in bytes
+5.1  Layout
 
-  What it's for: a self-describing directory of the file. Because every
-  section's start is here, a loader needs no preliminary scan. The header
-  is also the only part of the file that is NOT XOR-masked (see section
-  2a), so these 32 bytes are recoverable straight from disk.
+  stringCount consecutive entries, beginning at stringTableOffset:
 
-  How to use it: validate magic+version first, BEFORE demasking. Earlier
-  formats (v1 JSON blob, v2 binary layout, v3 cleartext binary) must be
-  rejected - v4 is not backward compatible and a loader must not attempt a
-  best-effort parse of a mismatched version. Treat the offsets as
-  authoritative. Use "Total file size" as a sanity check: if it does not
-  equal the actual file length the file is truncated/corrupt.
+      Size    Type      Field
+      ------  --------  ----------------------------------------------------
+      4       u32       byteLength
+      varies  bytes[n]  UTF-8 bytes, NOT null-terminated
+
+5.2  Requirements
+
+  R5.1  PRODUCER MUST emit string id 0 as the empty string.
+  R5.2  A string id is an index into this table. CONSUMER MUST treat an id
+        greater than or equal to stringCount as the empty string, and MUST NOT
+        fail the parse because of one.
+  R5.3  CONSUMER MUST bound every string read to the string table's extent
+        (see R17.1).
 
 
 --------------------------------------------------------------------------------
-  4. String table  (at stringTableOffset)
+  6. Asset table
 --------------------------------------------------------------------------------
 
-  Repeated [String count] times, contiguously:
+6.1  Layout
 
-  Size    Type    Description
-  ------  ------  --------------------------------------------------------------
-  4       u32     Byte length of the UTF-8 string  [len]
-  len     u8[len] UTF-8 bytes, no null terminator
+  assetCount consecutive records, beginning at assetTableOffset:
 
-  What it's for: deduplication. The same property name ("imagePath") or
-  component type ("Image") occurs hundreds of times in a scene; storing it
-  once and referencing a 4-byte id keeps files small and decoding fast.
+      Size    Type      Field
+      ------  --------  ----------------------------------------------------
+      4       u32       domainId       string id, engine-facing domain
+      4       u32       registryId     string id, engine-facing registry key
+      4       u32       dataLen        length of the embedded payload
+      varies  bytes[n]  data           raw file bytes, exactly as on disk
 
-  How to use it: read the whole table into an array once, BEFORE touching the
-  asset table or tree, because both reference strings by id. Ids are assigned
-  in order of first appearance starting at 0, and id 0 is, by contract, always
-  the empty string - so you can treat a 0 id as "" without a lookup.
+  The payload is the source file verbatim - PNG, TTF, OTF - with no added
+  header, framing or compression.
 
+6.2  Resolution order
 
---------------------------------------------------------------------------------
-  5. Asset table  (at assetTableOffset)
---------------------------------------------------------------------------------
+  R6.1  CONSUMER MUST resolve an asset in this order and use the first source
+        that yields a usable resource:
+          1. If domainId and registryId both denote non-empty strings, resolve
+             (domain, registryValue) through the engine's own asset registry.
+          2. Otherwise, or if the registry yields nothing, and dataLen > 0,
+             decode the embedded bytes.
+          3. Otherwise, substitute a placeholder. CONSUMER MUST NOT fail the
+             load because a single asset is unresolvable.
 
-  Repeated [Asset count] times, contiguously:
+6.3  Requirements
 
-  Size      Type      Description
-  ------    ------    ----------------------------------------------------------
-  4         u32       Domain string id           (engine-facing asset domain)
-  4         u32       Registry value string id   (engine-facing registry key)
-  4         u32       Raw asset data length      [dataLen]
-  dataLen   u8        Raw baked file bytes (PNG/JPG/TTF/OTF/...), no terminator
-
-  What it's for: this is the heart of the new asset model. An asset is NOT a
-  file path. It is an abstract identity - (domain, registryValue) - that means
-  something to your engine's asset registry, plus a self-contained copy of the
-  bytes so the file still works even if the registry has no entry.
-
-    - domain        : a namespace/category the engine understands, e.g.
-                      "ui", "items", "fonts". Opaque to the editor.
-    - registryValue : the key within that domain, e.g. "hero_portrait".
-                      Opaque to the editor.
-    - bytes         : the actual encoded image/font, decoded with your normal
-                      image/font loader.
-
-  Both are always present. dataLen may be 0 (the source file was missing at
-  bake time) but the identity strings are still emitted, so registry
-  resolution still works.
-
-  How to use it (recommended resolution order):
-
-      asset = assetTable[index]
-      domain   = strings[asset.domainId]
-      registry = strings[asset.registryId]
-      tex = engine.registry.tryResolve(domain, registry)   // preferred
-      if tex == null and asset.dataLen > 0:
-          tex = engine.decodeTexture(asset.bytes)            // fallback
-      // cache tex keyed by asset index so shared refs decode once
-
-  Assets are de-duplicated by (domain, registryValue, source) at bake time, so
-  two components pointing at the same image share one record and one decode.
-  The editor-side relative path is intentionally absent - do not look for it.
+  R6.2  Both id slots are ALWAYS written, but either MAY be string id 0 (the
+        empty string) when the author set no engine identity. CONSUMER MUST
+        treat an empty domain or registryValue as "no registry identity" and
+        proceed directly to the embedded bytes.
+  R6.3  dataLen MAY be 0, meaning the source file was missing at bake time.
+  R6.4  CONSUMER SHOULD cache a decoded asset keyed by its INDEX, so several
+        components referencing one asset share a single decode.
 
 
 --------------------------------------------------------------------------------
-  6. Element tree  (at treeOffset)
+  7. Element tree
 --------------------------------------------------------------------------------
 
-  Exactly one root Element, encoded pre-order (a node, then all its children).
-  An Element is:
+7.1  Layout
 
-  Size    Type      Description
-  ------  ------    ----------------------------------------------------------
-  4       u32       Element name string id
-  16      u8[16]    Element UUID, raw RFC-4122 byte order
-  2       u16       Component count
-  ...               Component records (Component count of them)
-  4       u32       Child count
-  ...               Child Elements (Child count of them, recursive)
+  Exactly one root element begins at treeOffset. An element record is:
 
-  What it's for: the UI hierarchy. The UUID is stable across bakes so an
-  engine can keep references/bindings to a specific element.
+      Size    Type       Field
+      ------  ---------  ---------------------------------------------------
+      4       u32        nameId          string id of the element's name
+      16      bytes[16]  uuid            RFC 4122 binary form, big-endian
+                                         fields as produced by toRfc4122()
+      2       u16        componentCount
+      varies             components      componentCount component records
+      4       u32        childCount
+      varies             children        childCount element records
 
-  How to use it: decode recursively. Read the name and UUID, decode
-  [componentCount] components onto the node, then decode [childCount] child
-  Elements as children of this node. There is exactly one root; do not loop
-  for siblings at the top level.
+  Children are emitted depth-first in authoring order.
 
+7.2  Requirements
 
---------------------------------------------------------------------------------
-  7. Component record
---------------------------------------------------------------------------------
+  R7.1  The uuid is stable across bakes of an unchanged scene and MAY be used
+        as a persistent key.
+  R7.2  The all-zero uuid is RESERVED and means "no stable identity". CONSUMER
+        MUST NOT treat two all-zero uuids as the same element.
+  R7.3  CONSUMER MUST impose a maximum nesting depth and reject a file that
+        exceeds it. The reference decoder uses 64, counting the root as depth
+        0.
 
-  Size       Type    Description
-  ------     ------  -----------------------------------------------------------
-  4          u32     Component type-name string id (e.g. "Image", "Transform")
-  4          u32     Payload length in bytes  [payloadLen]
-  payloadLen bytes   Payload (the items below)
-
-  Payload:
-  2          u16     Field count
-  ...                Fields (Field count of them)
-
-  What it's for: payloadLen is a skip handle. It counts every byte after
-  itself (the field count plus all fields). A loader that does not recognise
-  the component type, or wants to ignore it, jumps payloadLen bytes and keeps
-  going - the format stays forward-compatible as new component types appear.
-
-  How to use it:
-
-      typeName  = strings[typeNameId]
-      payloadEnd = cursor_after_payloadLen + payloadLen
-      comp = engine.createComponent(typeName)   // may be null if unknown
-      read u16 fieldCount
-      for each field: decode it; if comp != null, apply it (section 8)
-      seek(payloadEnd)   // ALWAYS, even on success - this re-syncs the stream
-
-  Always resync to payloadEnd after the fields. That single rule means one
-  malformed or unknown component cannot derail the rest of the tree.
+        Rationale: a child record costs 26 bytes, so an unbounded recursive
+        decoder can be made to exhaust its stack from a small file.
 
 
 --------------------------------------------------------------------------------
-  8. Field
+  8. Component record
 --------------------------------------------------------------------------------
 
-  Size    Type    Description
-  ------  ------  --------------------------------------------------------------
-  4       u32     Property-name string id
-  1       u8      Type tag (below)
-  varies          Value, layout determined entirely by the tag
+8.1  Layout
 
-  Tag  Name        Value encoding
-  ---  ----------  ---------------------------------------------------------
-  0    NONE        (no bytes)            unrepresentable / null
-  1    BOOL        u8 (0 or 1)
-  2    INT32       i32, little-endian
-  3    INT64       i64, little-endian
-  4    DOUBLE      f64, little-endian IEEE-754
-  5    STRING      u32 string id
-  6    COLOR       u32 packed 0xAARRGGBB
-  7    ASSET_REF   u32 asset index (0xFFFFFFFF = no asset)
-  8    POINT       f64 x, f64 y (two little-endian IEEE-754 doubles)
+      Size    Type    Field
+      ------  ------  ------------------------------------------------------
+      4       u32     typeId        string id of the component's type name
+      4       u32     payloadLen    bytes following THIS field
+      2       u16     fieldCount
+      varies          fields        fieldCount field records (section 9)
 
-  What it's for: a self-describing key/value. The tag tells you exactly how
-  many bytes follow, so you can decode (or skip) a field without knowing the
-  component. Unknown tags are the one exception - their width is unknown, so
-  if you hit one, abandon the component and resync via payloadEnd (section 7).
+  payloadLen counts every byte after payloadLen itself, including fieldCount.
+  The record therefore ends at (offset of fieldCount) + payloadLen.
 
-  How to apply fields to a component instance:
+8.2  Requirements
 
-    * Most fields: set the property named strings[nameId] to the decoded
-      value. INT32 also carries enum/flags values; COLOR is ARGB.
-
-    * ASSET_REF: this field's NAME is an authoring path property
-      (imagePath/fontPath/iconPath) but it carries an asset INDEX, not a path.
-      Do NOT try to set a path. Instead:
-          if index != 0xFFFFFFFF:
-              asset = assetTable[index]
-              comp.assetDomain        = strings[asset.domainId]
-              comp.assetRegistryValue = strings[asset.registryId]
-              comp.texture/font       = resolve(asset)   // section 5
-      The component's visual content comes entirely from the resolved asset;
-      the original editor path is not recoverable and is not needed.
-
-    * POINT: a 2D vector (x, y). Used for Transform.position and
-      Transform.scale (scale carries width/height in pixels, not a factor).
-      Apply as the named property's two components.
-
-  How the writer chose the tag (for reference): a property whose name ends in
-  "Path" becomes ASSET_REF; "assetDomain"/"assetRegistryValue" are NOT emitted
-  as fields (they are folded into the asset record and reapplied as above);
-  everything else maps by type - bool->BOOL, integral->INT32/INT64,
-  floating-point->DOUBLE, enum/flags->INT32, QColor->COLOR, point->POINT,
-  string->STRING, anything else stringifiable->STRING, otherwise NONE.
-
-  Note on flags: enum AND bit-flag properties both emit as INT32. A flags
-  field carries the raw bitmask integer (not a list of set bits); decode it
-  by testing bits.
+  R8.1  CONSUMER MUST use payloadLen to skip a component whose type name it
+        does not recognise, and MUST continue with the next component.
+  R8.2  CONSUMER MUST seek to the record's declared end after reading a
+        component, whether or not every field was consumed. This resynchronises
+        after an unknown field tag.
+  R8.3  CONSUMER MUST NOT read past the record's declared end while decoding
+        its fields.
+  R8.4  A component type name is an arbitrary string; section 12 lists the
+        names this version's producer emits.
 
 
 --------------------------------------------------------------------------------
-  8a. Transform component fields  (always present on every element)
+  9. Field record and type tags
 --------------------------------------------------------------------------------
 
-  Every Element has exactly one "Transform" component. It is the element's
-  geometry and is emitted with these fields (names are the property-name
-  string ids; order is not guaranteed - dispatch on the name):
+9.1  Layout
 
-  Field name       Tag     Meaning
-  ---------------  ------  --------------------------------------------------
-  position         POINT   (x, y) offset, in pixels, relative to the parent
-  scale            POINT   (width, height) BASE size in pixels - NOT a factor
-  rotationDegrees  DOUBLE  rotation about the element center, degrees
-  anchors          INT32   anchor bitmask (see "Anchor / Stretch flags")
-  stretch          INT32   stretch bitmask (LEFT|RIGHT = fill width, etc.)
+      Size    Type    Field
+      ------  ------  ------------------------------------------------------
+      4       u32     nameId        string id of the property name
+      1       u8      tag           see 9.2
+      varies          value         layout determined entirely by the tag
 
-  All five are always written. position and scale are single POINT fields
-  (two f64s each) - there are no separate x / y / scaleX / scaleY scalar
-  fields in v3. anchors and stretch are plain INT32 bitmasks; a value of 0
-  means "no flags" (stretch defaults to 0; anchors defaults to 5 = LEFT|TOP).
-  See section 8b for the flag values and how scale/anchors resolve.
+9.2  Type tags
+
+  Tag  Name       Value encoding                          Width
+  ---  ---------  --------------------------------------  ----------
+  0    NONE       (no bytes)                               0
+  1    BOOL       u8, 0 or 1                               1
+  2    INT32      i32                                      4
+  3    INT64      i64                                      8
+  4    DOUBLE     f64                                      8
+  5    STRING     u32 string id                            4
+  6    COLOR      u32, 0xAARRGGBB                          4
+  7    ASSET_REF  u32 asset index, 0xFFFFFFFF = no asset   4
+  8    POINT      f64 x then f64 y                         16
+
+9.3  Requirements
+
+  R9.1  CONSUMER MUST dispatch on the field NAME, not on position. Field order
+        within a component is deterministic for a given producer version but is
+        NOT part of this specification.
+  R9.2  On encountering an unknown tag, CONSUMER MUST abandon the remainder of
+        the component and resynchronise per R8.2. The width of an unknown tag
+        cannot be inferred.
+  R9.3  COLOR channels are STRAIGHT (not premultiplied), alpha in the high
+        byte. A consumer compositing in premultiplied space MUST multiply the
+        colour channels by alpha/255 itself. There is no gamma marker; treat
+        values as sRGB.
+  R9.4  INT32 carries enum and bit-flag values. A flag field carries the raw
+        bitmask, not a list of set bits.
+  R9.5  ASSET_REF carries an asset INDEX even though the property name ends in
+        "Path". CONSUMER MUST NOT attempt to interpret it as a path. When the
+        index is neither 0xFFFFFFFF nor out of range, CONSUMER MUST apply:
+            component.assetDomain        = strings[assets[i].domainId]
+            component.assetRegistryValue = strings[assets[i].registryId]
+        and resolve the resource per section 6.
+  R9.6  CONSUMER MUST treat an out-of-range asset index as "no asset" and MUST
+        NOT fail the parse because of one.
 
 
 --------------------------------------------------------------------------------
-  8b. Anchor / Stretch flags & the sizing model
+  10. Encoder algorithm (normative)
 --------------------------------------------------------------------------------
 
-  anchors and stretch (and Text.alignment) are bitmasks over these flags:
+  This section defines exactly which properties become fields and with which
+  tag. A conforming producer MUST follow it so that consumers can rely on the
+  catalogue in section 12.
+
+10.1  Property scope
+
+  R10.1  Only properties declared on the component's MOST-DERIVED class are
+         emitted. Properties inherited from a base class are NOT emitted.
+
+         Rationale: this is why no component carries an "objectName" field. It
+         also means a property added to a shared base class would silently
+         vanish from every baked file.
+
+10.2  Per-property algorithm
+
+  For each property in declaration order:
+
+    1. If the property name is exactly "assetDomain" or "assetRegistryValue",
+       SKIP it. These are not fields; they are folded into the asset record
+       (section 6) and reapplied by the consumer per R9.5.
+
+    2. If the property name ends with the exact-case ASCII suffix "Path",
+       emit ASSET_REF. The value is the index of the asset record registered
+       for that path, or 0xFFFFFFFF when the path and both identity strings
+       are all empty.
+
+    3. Otherwise, if the value's type is an enumeration or a flag set, emit
+       INT32 carrying the raw integer.
+
+    4. Otherwise, dispatch on the value's type:
+           bool            -> BOOL
+           32-bit integer  -> INT32
+           64-bit integer  -> INT64
+           floating point  -> DOUBLE
+           colour          -> COLOR
+           2D point        -> POINT
+           string          -> STRING
+
+    5. Otherwise, if the value can be converted to a string, emit STRING.
+
+    6. Otherwise, emit NONE.
+
+  R10.2  The "Path" suffix test is CASE-SENSITIVE. A property named "iconpath"
+         is NOT an asset reference and is emitted as a STRING.
+
+
+--------------------------------------------------------------------------------
+  11. Geometry model
+--------------------------------------------------------------------------------
+
+11.1  The Transform component
+
+  Every element carries exactly one component of type "Transform".
+
+  Field            Tag     Default         Meaning
+  ---------------  ------  --------------  ----------------------------------
+  position         POINT   (0, 0)          offset from the anchored origin
+  rotationDegrees  DOUBLE  0.0             rotation about the final centre
+  scale            POINT   (100, 100)      BASE size, NOT a multiplier
+  anchors          INT32   5 (LEFT|TOP)    placement bitmask
+  stretch          INT32   0 (NONE)        stretch bitmask
+
+  R11.1  PRODUCER MUST emit a Transform component for every element.
+  R11.2  CONSUMER encountering an element with no Transform MUST substitute
+         the defaults above.
+
+11.2  Anchor and stretch flags
 
       NONE     = 0x00
       LEFT     = 0x01
@@ -353,183 +442,694 @@ trust the header offsets rather than assume adjacency.
       CENTER_X = 0x10
       CENTER_Y = 0x20
 
-  stretch: LEFT|RIGHT (0x03) = fill parent width, TOP|BOTTOM (0x0C) = fill
-  parent height.
+  R11.3  Within an axis the flags are mutually exclusive, and a conforming
+         producer never sets more than one per axis. A consumer MUST
+         nevertheless resolve a malformed combination deterministically, by
+         this precedence:
 
-  Effective size. scale is only the element's BASE size. The FINAL rendered
-  size is resolved by applying the element's components in order; a content
-  or layout component MAY overwrite it:
-    - Visual components (Text, Image, Button, Icon, Sprite, Toggle, Tooltip,
-      Dropdown, TextInput, ListRepeater, RadialMenu, DragSlot) size to their
-      own intrinsic content and ignore scale.
-    - StackLayout / GridLayout size to fit their children plus padding and
-      ignore scale.
-    - ScrollBox keeps scale only on its scroll axis; the cross axis fits
-      children.
-    - Slot is sized to its parent's rect.
-    - Plain elements (Transform + Panel, or Transform alone) use scale
-      directly.
+             horizontal:  RIGHT  >  CENTER_X  >  LEFT     (LEFT is the default)
+             vertical:    BOTTOM >  CENTER_Y  >  TOP      (TOP is the default)
 
-  Positioning, using the FINAL size (W, H) within the parent rect:
-      LEFT      localX = x
-      RIGHT     localX = parentW - W - x
-      CENTER_X  localX = (parentW - W)/2 + x
-      TOP       localY = y
-      BOTTOM    localY = parentH - H - y
-      CENTER_Y  localY = (parentH - H)/2 + y
-  final pos = parentTopLeft + (localX, localY); then rotate rotationDegrees
-  about the FINAL rect's center. Anchoring/rotation ALWAYS use the final
-  size, never raw scale.
+11.3  Size resolution
 
-  If the element's parent owns a layout component (StackLayout, GridLayout,
-  ScrollBox), the parent positions this element: its own position / anchors
-  / stretch are ignored for placement (scale still feeds the base size the
-  layout measures). Do not also apply this element's anchors, or it will be
-  double-positioned.
+  The final rendered size (W, H) is resolved in this order. This is the single
+  most important clause for a consumer to implement correctly.
 
+    1. Start from scale: W = scale.x, H = scale.y.
 
---------------------------------------------------------------------------------
-  8c. Text rendering  (Text & Button components)
---------------------------------------------------------------------------------
+    2. For each axis INDEPENDENTLY, if that axis of scale is <= 0, the axis
+       instead takes the intrinsic size contributed by the element's content
+       component, if it has one (section 12 names the contributors). A
+       non-positive scale axis is the ONLY way to request intrinsic sizing.
 
-  Two component types carry rendered glyph runs: "Text" and "Button". They
-  share the same font-resolution rules; they differ in which other fields
-  they ship and how the run is positioned inside the element's final rect.
+    3. If stretch has BOTH horizontal bits set (LEFT|RIGHT, 0x03):
+           W = parentW - 2 * position.x
+       If stretch has BOTH vertical bits set (TOP|BOTTOM, 0x0C):
+           H = parentH - 2 * position.y
+       position acts as a symmetric inset on a stretched axis. A single
+       stretch bit on an axis has NO effect.
 
-  Field set, by component (names are property-name string ids; dispatch on
-  the name - field order is not guaranteed):
+    4. If the element carries a layout component (StackLayout, GridLayout,
+       ScrollBox) the layout determines the element's own size by fitting its
+       children; see section 15.
 
-    Text:
-      text            STRING     UTF-8 glyph string to render
-      fontFamily      STRING     family hint (see resolution rules below)
-      pixelSize       INT32      glyph cell height in pixels (>= 1)
-      color           COLOR      glyph fill, 0xAARRGGBB, straight (un-premul.)
-      fontPath        ASSET_REF  font asset index (0xFFFFFFFF = no asset)
-      alignment       INT32      anchor-flag bitmask (see below)
-      hasBackground   BOOL       optional opaque backdrop hint (see below)
+    5. If the element carries a Slot component, its size is determined by its
+       master; see section 16.
 
-    Button:
-      text            STRING     UTF-8 glyph string to render (the label)
-      fontFamily      STRING     family hint
-      pixelSize       INT32      glyph cell height in pixels (>= 1)
-      textColor       COLOR      glyph fill, 0xAARRGGBB straight
-      fontPath        ASSET_REF  font asset index (0xFFFFFFFF = no asset)
-      (plus backgroundColor, imagePath, sliceLeft/Top/Right/Bottom for the
-       button skin - those are not part of the text run)
+    6. Clamp both axes to a minimum of 0.0001.
 
-  Both components also resolve their asset's (domain, registryValue) onto
-  the component as "assetDomain"/"assetRegistryValue" properties when the
-  ASSET_REF is non-null (section 8 / TAG_ASSET_REF rule).
+  R11.4  scale is a SIZE in scene units. It is NOT a scale factor. A consumer
+         that multiplies by it will be wrong by orders of magnitude.
 
-  Font resolution. For a single text-rendering component, an engine MUST try
-  these sources in order and use the first one that produces a usable face:
+11.4  Position resolution
 
-    1. If fontPath != 0xFFFFFFFF: look up assetTable[fontPath]. Resolve
-       (assetDomain, assetRegistryValue) through the engine's font registry.
-       If the registry returns a face, USE THAT FACE - do not override it
-       with fontFamily, even if a system font of that family exists.
-    2. Otherwise, if the same asset record's dataLen > 0: load the embedded
-       bytes (.ttf / .otf, raw file bytes, no header or framing added by the
-       container) into the engine's font system. Cache the resulting face
-       keyed by asset INDEX so multiple components sharing the asset share
-       one decode.
-    3. Otherwise (no asset, or asset present but dataLen == 0): look up
-       fontFamily in the engine's installed-fonts list.
-    4. Otherwise: fall back to the engine's default UI font. Never refuse to
-       render - missing fonts must degrade to a default, not to nothing.
+  Using the FINAL size (W, H) from 11.3 within the parent's rect:
 
-  fontFamily is purely a HINT for steps 3-4. A producer-side "Inter" or
-  "Helvetica" carries no guarantee the consuming machine has it; engines
-  must not error out if it is unknown.
+      LEFT      localX = position.x
+      RIGHT     localX = parentW - W - position.x
+      CENTER_X  localX = (parentW - W) / 2 + position.x
+      TOP       localY = position.y
+      BOTTOM    localY = parentH - H - position.y
+      CENTER_Y  localY = (parentH - H) / 2 + position.y
 
-  Pixel size. pixelSize is the GLYPH CELL HEIGHT in pixels, identical to
-  Qt's QFont::setPixelSize / FreeType's FT_Set_Pixel_Sizes(face, 0, pixelSize).
-  It is not a point size and not an EM. Engines MUST set the face's pixel
-  height to this value before measuring or rasterising; they MUST NOT scale
-  the rasterised result to fake the size (kerning and hinting would be wrong).
-  A pixelSize of 0 is invalid; if encountered, clamp to 1.
+  Final position = parentTopLeft + (localX, localY). Rotation is then applied
+  about the centre of the final rect.
 
-  Color. COLOR fields hold 0xAARRGGBB with one byte per channel, alpha in
-  the high byte, blue in the low. The channels are STRAIGHT (not premulti-
-  plied); engines that compose in premultiplied space must multiply RGB by
-  A/255 themselves. There is no gamma marker; treat as sRGB.
-
-  Text alignment. Text.alignment is the anchor-flag bitmask from section 8b
-  applied to the glyph RUN INSIDE the element's final rect (not to the
-  element's position - that is Transform.anchors). It is split into two
-  independent groups; engines MUST honour both:
-
-      Horizontal (pick the first set bit; default LEFT if none):
-        LEFT      0x01    left edge of run = left edge of rect
-        CENTER_X  0x10    run is centred horizontally in the rect
-        RIGHT     0x02    right edge of run = right edge of rect
-
-      Vertical   (pick the first set bit; default TOP if none):
-        TOP       0x04    baseline-aware: ascender top = top edge of rect
-        CENTER_Y  0x20    run's visual centre = rect centre
-        BOTTOM    0x08    descender bottom = bottom edge of rect
-
-  Other Anchor bits set on alignment have no meaning and MUST be ignored.
-  Multi-line wrapping is not specified by the format: an engine MAY treat
-  the text as a single line, or wrap to the rect's width with its own rule
-  - the format carries no maxWidth, lineHeight, or wrap-mode field.
-
-  Button has no alignment field. The label is ALWAYS centred both axes
-  inside the (post-9-slice) button rect; engines MUST treat it as
-  CENTER_X | CENTER_Y regardless of any other state.
-
-  hasBackground (Text only). When true, the engine SHOULD draw an opaque
-  backdrop behind the glyph run for legibility. The format carries no
-  backdrop colour, padding, or radius - those are an engine-side style
-  choice (the editor's preview uses a fixed contrast colour). When false,
-  no backdrop is drawn.
-
-  Step-by-step engine procedure for one Text/Button component:
-
-    1. Resolve the final rect for the owning element per section 8b.
-    2. Resolve the face (rules 1-4 above). Cache by asset index.
-    3. Set the face's pixel height to pixelSize (clamped >= 1).
-    4. Shape the "text" string with that face. Engines pick their own
-       shaper (HarfBuzz / DirectWrite / stb_truetype); the container does
-       not specify one.
-    5. Measure the shaped run's bounding box.
-    6. Place the run inside the final rect per alignment (Button = always
-       centred). On overflow, the engine's clipping/wrapping policy applies;
-       the format does not mandate one.
-    7. (Text only) If hasBackground, fill the run's bounding box (engine-
-       chosen padding) with an opaque backdrop before drawing glyphs.
-    8. Rasterise glyphs in the chosen blend mode using color / textColor as
-       straight ARGB.
-
-  Caching guidance. Face objects, glyph atlases, and shaped runs are
-  expensive; engines SHOULD key caches by (asset index, pixelSize) for faces
-  and by (asset index, pixelSize, text, alignment) for shaped runs. The
-  asset index is stable across components that share a font, so this keeps
-  rebuilds rare.
+  R11.5  Anchoring and rotation MUST use the final size, never raw scale.
+  R11.6  If the element's PARENT carries a layout component, the parent
+         positions this element. CONSUMER MUST then ignore this element's
+         position, anchors and stretch for placement, or it will be
+         double-positioned. scale still feeds the base size the layout
+         measures.
 
 
 --------------------------------------------------------------------------------
-  9. Reader requirements (conformance checklist)
+  12. Component catalogue
 --------------------------------------------------------------------------------
 
-  * Reject the file unless the first 4 bytes are "UIB4" and the version u16
-    equals 4. Do not attempt a "best effort" parse of a mismatched file.
-  * Validate the magic + version BEFORE demasking. The header bytes (0..31)
-    are NOT masked; everything from offset 32 onwards IS.
-  * Apply the section 2a XOR mask over [32..fileSize) exactly once before
-    reading the string table, asset table, or tree. The mask is its own
-    inverse, so a second pass would re-mask the data.
-  * Treat header section offsets as authoritative; never infer them from
-    adjacency.
-  * Bounds-check every read against the section/file size. A length or offset
-    that runs past EOF invalidates the whole parse.
-  * Read the string table fully before the asset table or tree.
-  * Unknown component types and unknown field tags are non-fatal: skip via
-    payloadLen / resync to payload-end and continue.
-  * Cache resolved assets by asset index; multiple components legitimately
-    share one index.
+  The 22 type names a conforming producer of this version emits. The field
+  lists below were obtained by baking a scene containing one element of every
+  type and decoding the resulting file, so they are what is actually on the
+  wire, not a transcription of source.
 
-A reference decoder that round-trips this format back into an element tree
-ships with UIMaker2 as UiBinReader (see src/scene/UiBinReader.*); the matching
-encoder is UiBinWriter.
+  Field order within a component is the producer's property-declaration order.
+  It is deterministic but NOT normative: CONSUMER MUST dispatch on the name
+  (R9.1).
+
+  The "Sizes" column of 12.1 states whether the component contributes an
+  intrinsic size under clause 11.3 step 2.
+
+12.1  Type summary
+
+  Type name      Role                        Sizes    Notes
+  -------------  --------------------------  -------  -----------------------
+  Transform      geometry                    -        on every element
+  Panel          decoration                  no
+  Image          texture                     yes
+  Text           glyph run                   yes
+  Button         glyph run + skin            yes
+  ProgressBar    decoration                  no
+  Toggle         mock control                yes
+  Dropdown       mock control                yes
+  TextInput      mock control                yes
+  Icon           texture                     yes
+  Sprite         texture, sheet sub-frame    yes
+  Tooltip        mock control                yes
+  Modal          decoration                  no
+  TabContainer   container, tab strip        no       drives Slot visibility
+  RadialMenu     mock control                yes
+  Minimap        decoration                  no
+  DragSlot       mock control + texture      yes
+  ListRepeater   mock control                yes
+  Slot           container child             special  see section 16
+  StackLayout    layout                      layout   see section 15
+  GridLayout     layout                      layout   see section 15
+  ScrollBox      layout                      layout   see section 15
+
+12.2  Field tables
+
+  Transform
+    position         POINT      (0, 0)
+    rotationDegrees  DOUBLE     0.0
+    scale            POINT      (100, 100)
+    anchors          INT32      5
+    stretch          INT32      0
+
+  Panel
+    backgroundColor  COLOR      0xC8323237
+    borderColor      COLOR      0xFF64646E
+    borderWidth      DOUBLE     1.0
+    cornerRadius     DOUBLE     6.0
+
+  Image
+    imagePath        ASSET_REF  0xFFFFFFFF
+    tint             COLOR      0xFFFFFFFF   multiply; white is identity
+    pixelated        BOOL       false        nearest-neighbour hint
+    textureFill      INT32      0            section 13
+    cropAnchor       INT32      4            section 13
+    cropOffsetX      INT32      0            section 13
+    cropOffsetY      INT32      0            section 13
+
+  Text
+    text             STRING     ""
+    fontFamily       STRING     "Inter"      hint only; see section 14
+    pixelSize        INT32      24           glyph cell height in pixels
+    color            COLOR      0xFFFFFFFF
+    fontPath         ASSET_REF  0xFFFFFFFF
+    alignment        INT32      5            anchor bitmask, see section 14
+    hasBackground    BOOL       false        see section 14
+
+  Button
+    text             STRING     "Button"
+    backgroundColor  COLOR      0xFF282828   seeds the default skin, see below
+    textColor        COLOR      0xFFFFFFFF
+    fontFamily       STRING     "Inter"
+    pixelSize        INT32      24
+    fontPath         ASSET_REF  0xFFFFFFFF
+    imagePath        ASSET_REF  0xFFFFFFFF   the skin texture
+    sliceLeft        INT32      6            9-slice inset, texels
+    sliceTop         INT32      6
+    sliceRight       INT32      6
+    sliceBottom      INT32      6
+    textureFill      INT32      0
+    cropAnchor       INT32      4
+    cropOffsetX      INT32      0
+    cropOffsetY      INT32      0
+
+    backgroundColor is NOT painted directly. When imagePath resolves to no
+    asset, the reference renderer generates a default skin from it: a vertical
+    gradient from backgroundColor lightened 15% to darkened 5%. A consumer MAY
+    substitute its own default skin.
+
+  ProgressBar
+    value            DOUBLE     0.5          clamp to [0, 1] when rendering
+    fillColor        COLOR      0xFF32C850
+    backgroundColor  COLOR      0xFF28282D
+    borderColor      COLOR      0xFF50505A
+    direction        INT32      0            0 = Horizontal, 1 = Vertical
+    cornerRadius     DOUBLE     4.0
+
+    NOTE: ProgressBar.direction is the ONLY direction field in this format
+    whose 0 value means Horizontal. StackLayout, ScrollBox and ListRepeater
+    all use 0 = Vertical. See Appendix A.2.
+
+  Toggle
+    checked          BOOL       false
+    onColor          COLOR      0xFF32C850
+    offColor         COLOR      0xFF50505A
+    knobColor        COLOR      0xFFFFFFFF
+    label            STRING     "Toggle"
+
+  Dropdown
+    options          STRING     "Option A,Option B,Option C"   comma-separated
+    selectedIndex    INT32      0
+    backgroundColor  COLOR      0xFF2D2D32
+    textColor        COLOR      0xFFFFFFFF
+    borderColor      COLOR      0xFF5A5A64
+    fontFamily       STRING     "Inter"
+    pixelSize        INT32      16
+
+    Empty entries are discarded when splitting, so an empty option shifts the
+    indices that selectedIndex refers to.
+
+  TextInput
+    placeholder      STRING     "Enter text..."
+    text             STRING     ""
+    backgroundColor  COLOR      0xFF1E1E23
+    textColor        COLOR      0xFFFFFFFF
+    placeholderColor COLOR      0xFF787882
+    borderColor      COLOR      0xFF50505A
+    fontFamily       STRING     "Inter"
+    pixelSize        INT32      16
+
+  Icon
+    imagePath        ASSET_REF  0xFFFFFFFF
+    tintColor        COLOR      0xFFFFFFFF
+    iconSize         INT32      32
+    textureFill      INT32      0
+    cropAnchor       INT32      4
+    cropOffsetX      INT32      0
+    cropOffsetY      INT32      0
+
+  Sprite
+    imagePath        ASSET_REF  0xFFFFFFFF   the sheet
+    frameWidth       INT32      64
+    frameHeight      INT32      64
+    frameCount       INT32      1
+    currentFrame     INT32      0
+    columns          INT32      1
+    textureFill      INT32      0
+    cropAnchor       INT32      4
+    cropOffsetX      INT32      0
+    cropOffsetY      INT32      0
+
+    The sub-frame is column (currentFrame mod columns), row
+    (currentFrame div columns), each frameWidth x frameHeight texels. These
+    five fields are INDEPENDENT; a consumer MUST clamp a sub-frame that falls
+    outside the sheet rather than sampling out of bounds.
+
+  Tooltip
+    tooltipText      STRING     "Tooltip text here"
+    backgroundColor  COLOR      0xE619191E
+    textColor        COLOR      0xFFDCDCE1
+    borderColor      COLOR      0xFF50505A
+    fontFamily       STRING     "Inter"
+    pixelSize        INT32      13
+
+  Modal
+    overlayColor     COLOR      0x8C000000
+    panelColor       COLOR      0xFF2D2D32
+    borderColor      COLOR      0xFF5A5A64
+    cornerRadius     DOUBLE     8.0
+    visible          BOOL       true         author-time intent, not runtime
+
+  TabContainer
+    tabNames         STRING     "Tab 1,Tab 2,Tab 3"   comma-separated
+    activeTab        INT32      0
+    tabHeight        INT32      32           scene units of the tab strip
+    activeColor      COLOR      0xFF3C3C44
+    inactiveColor    COLOR      0xFF28282D
+    textColor        COLOR      0xFFFFFFFF
+    backgroundColor  COLOR      0xFF323237
+
+  RadialMenu
+    sliceCount       INT32      6
+    innerRadius      DOUBLE     40.0
+    outerRadius      DOUBLE     100.0
+    sliceColor       COLOR      0xC832323A
+    borderColor      COLOR      0xFF646473
+    highlightColor   COLOR      0x6450A0FF
+    highlightIndex   INT32      -1           -1 means no slice highlighted
+
+    innerRadius is not validated against outerRadius.
+
+  Minimap
+    backgroundColor  COLOR      0xC8141E14
+    borderColor      COLOR      0xFF647864
+    viewportColor    COLOR      0x3CFFFFFF
+    borderWidth      DOUBLE     2.0
+    shape            INT32      0            0 = Rectangle, 1 = Circle
+
+  DragSlot
+    slotSize         INT32      64
+    backgroundColor  COLOR      0xFF282830
+    borderColor      COLOR      0xFF50505F
+    emptyColor       COLOR      0x78373741
+    cornerRadius     DOUBLE     4.0
+    isEmpty          BOOL       true
+    iconPath         ASSET_REF  0xFFFFFFFF
+    textureFill      INT32      0
+    cropAnchor       INT32      4
+    cropOffsetX      INT32      0
+    cropOffsetY      INT32      0
+
+  ListRepeater
+    itemCount        INT32      5
+    itemHeight       INT32      40           extent along the RUN axis
+    spacing          DOUBLE     2.0
+    direction        INT32      0            0 = Vertical, 1 = Horizontal
+    labels           STRING     "Item 1,..."  comma-separated, empties KEPT
+    itemColor        COLOR      0xFF2D2D34
+    alternateColor   COLOR      0xFF32323A
+    borderColor      COLOR      0xFF464650
+
+    itemHeight is the extent along whichever axis the list runs, so in
+    Horizontal mode it is the item WIDTH. itemCount and labels are independent:
+    surplus labels are ignored, missing ones are synthesised.
+
+  Slot
+    slotIndex        INT32      0
+    masterKind       STRING     "TabContainer" or "RadialMenu"
+
+  StackLayout
+    direction        INT32      0            0 = Vertical, 1 = Horizontal
+    spacing          DOUBLE     8.0
+    padding          DOUBLE     8.0
+
+  GridLayout
+    columns          INT32      2
+    spacingH         DOUBLE     8.0
+    spacingV         DOUBLE     8.0
+    padding          DOUBLE     8.0
+
+  ScrollBox
+    direction        INT32      0            0 = Vertical, 1 = Horizontal
+    spacing          DOUBLE     8.0
+    padding          DOUBLE     8.0
+
+
+--------------------------------------------------------------------------------
+  13. Pixel-perfect rendering model
+--------------------------------------------------------------------------------
+
+  Five component types carry a texture: Image, Button, Icon, Sprite and
+  DragSlot. Each exposes four fields that control how that texture fills its
+  element's rect.
+
+13.1  Fields
+
+  textureFill   INT32   0 = STRETCH, 1 = WRAP
+  cropAnchor    INT32   0..8, reading order, see 13.2
+  cropOffsetX   INT32   signed texel shift of the horizontal tiling phase
+  cropOffsetY   INT32   signed texel shift of the vertical tiling phase
+
+  R13.1  CONSUMER MUST treat a textureFill value other than 0 or 1 as 0, and a
+         cropAnchor outside 0..8 as 4 (Center). cropOffsetX and cropOffsetY are
+         NOT clamped by the producer and MAY be any i32.
+
+13.2  Crop anchor values
+
+      0 TopLeft     1 Top      2 TopRight
+      3 Left        4 Center   5 Right
+      6 BottomLeft  7 Bottom   8 BottomRight
+
+  The anchor resolves independently per axis:
+
+      horizontal:  0,3,6 -> NEAR    1,4,7 -> CENTER    2,5,8 -> FAR
+      vertical:    0,1,2 -> NEAR    3,4,5 -> CENTER    6,7,8 -> FAR
+
+13.3  STRETCH (textureFill = 0)
+
+  The texture is scaled to the destination rect. This is the traditional
+  behaviour and imposes no relationship between texels and pixels.
+
+13.4  WRAP (textureFill = 1)
+
+  One texel occupies exactly one VIRTUAL PIXEL. The texture is never scaled.
+  A destination larger than the texture REPEATS it; a destination smaller
+  CROPS it. A 9-slice pins the edges so only the interior repeats.
+
+  A virtual pixel is a square of `unit` scene units. See 13.6 for how a
+  consumer obtains `unit`.
+
+13.5  Per-axis span algorithm (normative)
+
+  Solve each axis independently; the 2D result is their cross product. That is
+  precisely why corners never repeat, edges repeat along one axis only, and
+  the interior repeats along both.
+
+  Inputs, all in texels except d:
+      n     source extent
+      a, b  near and far 9-slice insets, 0 for an unsliced axis
+      d     destination extent in VIRTUAL PIXELS
+      side  NEAR, CENTER or FAR, from the crop anchor
+      off   signed crop offset
+
+  Output: a list of spans (srcStart, dstStart, len). Every span copies texels
+  1:1; there is no scale factor anywhere in the result.
+
+      if n <= 0 or d <= 0: no spans
+
+      # An inset pair with no interior cannot describe a slice on this axis.
+      if a < 0 or b < 0 or a + b >= n:
+          a = 0; b = 0
+
+      # A destination narrower than the insets shrinks them rather than
+      # dropping an edge entirely.
+      da = min(a, d / 2)              # integer division
+      db = min(b, d - da)
+
+      if da > 0: emit (0,      0,      da)      # near band, never repeats
+      if db > 0: emit (n - db, d - db, db)      # far band,  never repeats
+
+      dstMid = d - da - db                      # interior, virtual pixels
+      srcMid = n - a - b                        # interior period, texels
+      if dstMid <= 0 or srcMid <= 0: done
+
+      shortfall = (srcMid - (dstMid mod srcMid)) mod srcMid
+      phase = 0
+      if side == FAR:    phase = shortfall
+      if side == CENTER: phase = shortfall / 2  # integer division
+      phase = ((phase + off) mod srcMid + srcMid) mod srcMid
+
+      x = -phase
+      while x < dstMid:
+          visibleStart = max(0, x)
+          visibleEnd   = min(dstMid, x + srcMid)
+          len          = visibleEnd - visibleStart
+          if len > 0:
+              emit (a + (visibleStart - x), da + visibleStart, len)
+          x = x + srcMid
+
+  R13.2  CONSUMER implementing WRAP MUST reproduce this algorithm exactly.
+         The spans MUST tile the destination with no gap and no overlap, and
+         MUST never sample outside the texture.
+  R13.3  CONSUMER MUST sample with nearest-neighbour filtering in WRAP mode,
+         regardless of the pixelated field.
+
+  Worked example. The reference asset is 200 x 20 texels with insets
+  left 3, top 3, right 3, bottom 4, drawn into 400 x 40 virtual pixels with
+  anchor Center:
+
+      X: [0,3) [3,103) [103,297) [297,397) [397,400)
+      Y: [0,3) [3,13)  [13,26)   [26,36)   [36,40)
+
+  giving 25 draw calls. Destination columns 0..2 are texels 0..2 and columns
+  397..399 are texels 197..199 - the border is 1:1 and does not warp.
+
+13.6  The virtual pixel unit
+
+  R13.4  The `unit` - scene units per virtual pixel - is NOT carried in a
+         version 4 file. A consumer MUST obtain it out of band. See A.1.
+
+13.7  The 9-slice source
+
+  For Button, the insets come from sliceLeft/sliceTop/sliceRight/sliceBottom.
+
+  R13.5  For Image, Icon, Sprite and DragSlot, a version 4 file carries NO
+         slice. The producer reads it from a sidecar XML file that is NOT
+         embedded in the bake. A consumer MUST treat these textures as
+         unsliced unless it obtains the insets out of band. See A.1.
+
+  The sidecar, for reference, sits beside the image with the extension
+  replaced by .xml:
+
+      <sprite>
+          <slice left="3" top="3" right="3" bottom="4"/>
+      </sprite>
+
+  Unknown elements inside <sprite> are ignored, so the schema can grow.
+
+
+--------------------------------------------------------------------------------
+  14. Text rendering
+--------------------------------------------------------------------------------
+
+  Two component types carry glyph runs: Text and Button. They share the font
+  resolution rules and differ in which colour field names the glyph fill -
+  Text.color versus Button.textColor.
+
+14.1  Font resolution
+
+  R14.1  CONSUMER MUST try these sources in order and use the first that
+         yields a usable face:
+           1. If fontPath references an asset, resolve its (domain,
+              registryValue) through the engine's font registry. If the
+              registry returns a face, USE IT - do not override it with
+              fontFamily even if a system font of that family exists.
+           2. Otherwise, if that asset's dataLen > 0, load the embedded bytes.
+           3. Otherwise, look up fontFamily among installed fonts.
+           4. Otherwise, use the engine's default UI font.
+  R14.2  CONSUMER MUST NOT refuse to render because a font is missing. A
+         missing font degrades to a default, never to nothing.
+  R14.3  fontFamily is a HINT for steps 3 and 4 only. A producer-side family
+         name carries no guarantee the consuming machine has it.
+
+14.2  Pixel size
+
+  pixelSize is the GLYPH CELL HEIGHT in pixels - equivalent to FreeType's
+  FT_Set_Pixel_Sizes(face, 0, pixelSize). It is not a point size and not an em.
+
+  R14.4  CONSUMER MUST set the face's pixel height to this value before
+         measuring or rasterising, and MUST NOT scale a rasterised result to
+         fake the size: kerning and hinting would be wrong.
+  R14.5  pixelSize is written UNCLAMPED and MAY be 0 or negative. CONSUMER
+         MUST clamp it to at least 1.
+
+14.3  Alignment
+
+  Text.alignment is the anchor bitmask from 11.2 applied to the glyph RUN
+  inside the element's final rect. It is independent of Transform.anchors,
+  which place the element itself.
+
+  R14.6  CONSUMER MUST resolve alignment with the precedence in R11.3:
+         horizontal RIGHT > CENTER_X > LEFT, vertical BOTTOM > CENTER_Y > TOP.
+
+      LEFT      0x01   left edge of run at left edge of rect
+      CENTER_X  0x10   run centred horizontally
+      RIGHT     0x02   right edge of run at right edge of rect
+      TOP       0x04   ascender top at top edge of rect
+      CENTER_Y  0x20   run's visual centre at rect centre
+      BOTTOM    0x08   descender bottom at bottom edge of rect
+
+14.4  hasBackground
+
+  R14.7  When Text.hasBackground is true, the reference renderer draws the
+         glyph run a second time UNDERNEATH the real run, offset by
+         max(1, pixelSize / 16) pixels on both axes, in rgba(0, 0, 0, 160).
+         It is a translucent drop shadow, not an opaque backdrop. A consumer
+         MAY substitute an equivalent legibility treatment.
+
+
+--------------------------------------------------------------------------------
+  15. Layout components
+--------------------------------------------------------------------------------
+
+  R15.1  An element carrying StackLayout, GridLayout or ScrollBox positions
+         its CHILDREN and derives its OWN size from them. CONSUMER MUST re-run
+         the layout at load; the positions stored in each child's Transform
+         are authoring leftovers and MUST be ignored for placement (R11.6).
+
+15.1  StackLayout
+
+      offset = padding
+      for each child in order:
+          if direction == 0 (Vertical):   child at (padding, offset)
+          else:                           child at (offset, padding)
+          offset += child extent along the run axis + spacing
+      remove the trailing spacing, add padding
+      own size = (maxCrossExtent + 2*padding) across, offset along the run
+
+  There is no cross-axis alignment and no fill: every child sits at `padding`
+  on the cross axis.
+
+15.2  ScrollBox
+
+  Identical placement to StackLayout, with one difference: the element keeps
+  its own scale on the SCROLL axis and fits children on the cross axis. The
+  format carries no scroll offset and no content extent.
+
+15.3  GridLayout
+
+      pass 1: colWidth[i mod columns]  = max child width in that column
+              rowHeight[i div columns] = max child height in that row
+      pass 2: place each child at the cumulative sum of preceding columns and
+              rows, plus spacingH / spacingV, offset by padding
+
+  Cells are top-left packed; a child smaller than its cell leaves a gap.
+  There is no span, no alignment and no uniform-cell mode.
+
+  R15.2  Layout components measure each child's UNROTATED extent. A rotated
+         child is measured by its axis-aligned local rect.
+
+
+--------------------------------------------------------------------------------
+  16. Slots and tab containers
+--------------------------------------------------------------------------------
+
+  A Slot is a container child materialised by a master component. Its
+  masterKind names the master's type and its slotIndex identifies which slot
+  it is.
+
+  R16.1  When masterKind is "TabContainer": the slot's rect is the parent's
+         rect inset from the top by the master's tabHeight, i.e.
+         height = parentH - tabHeight, positioned tabHeight below the parent's
+         top edge. The slot is VISIBLE only when its slotIndex equals the
+         master's activeTab.
+  R16.2  When masterKind is "RadialMenu": the slot fills the parent rect. The
+         format does NOT describe per-slice placement; a consumer wanting
+         radial placement MUST derive it from sliceCount and the radii.
+  R16.3  Slot indices are not guaranteed contiguous or ordered; dispatch on
+         slotIndex, not on child order.
+
+
+--------------------------------------------------------------------------------
+  17. Conformance
+--------------------------------------------------------------------------------
+
+17.1  Producer checklist
+
+  [ ] magic "UIB4", version 4, flags 0                             R3.1, R3.2
+  [ ] fileSize equals the real file length                          R3.7
+  [ ] body obfuscated as one run from offset 32                     R4.1
+  [ ] string id 0 is the empty string                               R5.1
+  [ ] a Transform component on every element                        R11.1
+  [ ] properties emitted per the section 10 algorithm               R10.1, R10.2
+  [ ] the file is decoded back and validated before it replaces
+      an existing file at the target path
+
+17.2  Consumer checklist
+
+  [ ] reject on magic mismatch                                      R3.3
+  [ ] reject on version mismatch, BEFORE demasking                  R3.4, R3.5
+  [ ] ignore the flags word entirely                                R3.6
+  [ ] reject when fileSize disagrees with the real length           R3.7
+  [ ] bound every read to its SECTION, not merely to the file       R17.1
+  [ ] cap element nesting depth                                     R7.3
+  [ ] skip unknown component types via payloadLen                   R8.1
+  [ ] resynchronise to payloadEnd after an unknown field tag        R8.2, R9.2
+  [ ] treat out-of-range string ids as empty                        R5.2
+  [ ] treat out-of-range asset indices as absent                    R9.6
+  [ ] never fail the load because one asset is unresolvable         R6.1
+  [ ] clamp pixelSize to >= 1                                       R14.5
+  [ ] resolve anchors and alignment with the stated precedence      R11.3
+  [ ] re-run layouts and ignore stored child positions              R15.1
+  [ ] use the FINAL size for anchoring and rotation                 R11.5
+
+  R17.1  CONSUMER MUST bound reads to the SECTION being parsed, not merely to
+         the file. A string-table length that overruns into the asset table
+         must be rejected, not silently tolerated because it still lies inside
+         the file.
+
+17.3  Structural limits
+
+  componentCount   u16    at most 65535 per element
+  fieldCount       u16    at most 65535 per component
+  childCount       u32    at most 4294967295 per element
+  string length    u32    per entry
+  asset dataLen    u32    per record
+  nesting depth    -      at most 64 in the reference decoder (R7.3)
+  total file size  u32    below 2 GiB in practice; see A.4
+
+  R17.2  PRODUCER MUST NOT emit a scene that exceeds any of these.
+
+
+--------------------------------------------------------------------------------
+  Appendix A. Known gaps and defects (informative)
+--------------------------------------------------------------------------------
+
+  Recorded so implementers are not surprised. Each is a candidate for a
+  version 5.
+
+A.1  The rendering model is not in the file
+
+  The producer's document-level rendering model - whether geometry is
+  continuous or snapped to a virtual-pixel grid, and the size of that virtual
+  pixel - is written only to the editor's scene.json, never to the .uibin.
+  Neither are the 9-slice insets for Image, Icon, Sprite and DragSlot, which
+  live in a sidecar XML that is not embedded.
+
+  A consumer therefore CANNOT reproduce WRAP rendering (section 13) from a
+  version 4 file alone; it needs `unit` and, for those four types, the insets.
+  This is the single largest gap in the format and the primary motivation for
+  a version 5.
+
+A.2  ProgressBar.direction is inverted relative to every other direction field
+
+  ProgressBar uses 0 = Horizontal, 1 = Vertical. StackLayout, ScrollBox and
+  ListRepeater use 0 = Vertical, 1 = Horizontal. The producer's own property
+  editor presents all four with a Vertical-first list, so a ProgressBar
+  authored as "Vertical" is baked as Horizontal. Consumers MUST follow the
+  table in 12.2 rather than assuming a shared convention.
+
+A.3  Button carries two asset references but one identity
+
+  Button has both fontPath and imagePath, but a component carries a single
+  (assetDomain, assetRegistryValue) pair. The producer stamps that one pair
+  onto BOTH asset records, and a consumer applying R9.5 for each reference in
+  turn ends with whichever was applied last. A button whose skin and font both
+  come from registries cannot express two distinct identities in version 4.
+
+  Until this is fixed, a consumer SHOULD prefer the embedded bytes for
+  Button.fontPath rather than the registry identity.
+
+A.4  The container is int-bounded in practice
+
+  Every length in the header is u32, but the reference decoder's cursor
+  arithmetic is 32-bit signed, so files at or above 2 GiB cannot be read by it
+  even though they are representable.
+
+A.5  Round-trip validation is structural only
+
+  The producer re-reads every file it writes and aborts the write on failure,
+  so a malformed container never replaces a good one. That check proves
+  FRAMING only: it never compares decoded values against the source scene, so
+  a producer bug that writes well-framed but wrong values passes it.
+
+
+--------------------------------------------------------------------------------
+  Appendix B. Version history (informative)
+--------------------------------------------------------------------------------
+
+  v4  Current. Magic "UIB4". Adds the XOR-obfuscated body (section 4) over v3.
+      Later v4 revisions added the POINT tag for Transform.position and
+      Transform.scale - files written by an early v4 producer encoded those
+      two through the stringify fallback and are NOT readable by a current
+      decoder. Most recently, the four pixel-perfect fields of section 13 were
+      added to Image, Button, Icon, Sprite and DragSlot; a decoder that does
+      not know them skips them by name with no special handling.
+
+  v3  Magic "UIB3". Introduced the engine-facing (domain, registryValue) asset
+      identity. No obfuscation.
+
 ================================================================================
