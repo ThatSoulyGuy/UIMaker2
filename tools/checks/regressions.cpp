@@ -447,11 +447,81 @@ void CheckRegressions()
             check(zoom() > z0, "and zooms rather than scrolling");
         }
 
-        // Pinch.
+        // Pinch. BOTH directions: macOS reports the increment as positive when
+        // spreading fingers and NEGATIVE when pinching together, so a guard on
+        // the sign of the increment silently drops every zoom-out.
         {
             const double z0 = zoom();
-            check(pz.HandlePinch(QPoint(450, 300), 0.10, ctx).consumed, "a pinch is handled");
+            check(pz.HandlePinch(QPoint(450, 300), 0.10, ctx).consumed, "a pinch out is handled");
             check(zoom() > z0, "and zooms in");
+
+            const double z1 = zoom();
+            check(pz.HandlePinch(QPoint(450, 300), -0.10, ctx).consumed, "a pinch IN is handled");
+            check(zoom() < z1, "and zooms OUT");
+        }
+
+        // Wheel, both directions.
+        {
+            const double z0 = zoom();
+
+            WheelEvent down;
+            down.viewPos = QPoint(450, 300);
+            down.angleDelta = QPoint(0, -120);
+            down.delta = -120;
+            down.fromTrackpad = false;
+
+            check(pz.HandleWheel(down, ctx).consumed, "a wheel detent DOWN is handled");
+            check(zoom() < z0, "and zooms out");
+        }
+
+        // A view parked OUTSIDE the zoom limits (fitInView/FitToItem set the
+        // transform directly and bypass ZoomAt) must never have its gesture
+        // REVERSED by the clamp. Clamping the factor rather than the resulting
+        // zoom turned a zoom-out request into a 2.5x zoom IN.
+        {
+            view.setTransform(QTransform::fromScale(30.0, 30.0));   // above max 20
+
+            WheelEvent in;
+            in.viewPos = QPoint(450, 300);
+            in.angleDelta = QPoint(0, 120);
+            in.delta = 120;
+
+            pz.HandleWheel(in, ctx);
+            check(view.transform().m11() >= 30.0,
+                  "above the max, a zoom-IN gesture never zooms OUT");
+
+            view.setTransform(QTransform::fromScale(0.02, 0.02));   // below min 0.05
+
+            WheelEvent out;
+            out.viewPos = QPoint(450, 300);
+            out.angleDelta = QPoint(0, -120);
+            out.delta = -120;
+
+            pz.HandleWheel(out, ctx);
+            check(view.transform().m11() <= 0.02,
+                  "below the min, a zoom-OUT gesture never zooms IN");
+
+            // And coming back INTO range is still allowed.
+            view.setTransform(QTransform::fromScale(30.0, 30.0));
+            pz.HandleWheel(out, ctx);
+            check(view.transform().m11() < 30.0, "but zooming back toward the range still works");
+
+            view.setTransform(QTransform::fromScale(1.0, 1.0));
+        }
+
+        // Ctrl + trackpad, both directions.
+        {
+            const double z0 = zoom();
+
+            WheelEvent e;
+            e.viewPos = QPoint(450, 300);
+            e.pixelDelta = QPoint(0, -30);
+            e.angleDelta = QPoint(0, -30);
+            e.fromTrackpad = true;
+            e.modifiers = Qt::ControlModifier;
+
+            check(pz.HandleWheel(e, ctx).consumed, "ctrl + trackpad DOWN is handled");
+            check(zoom() < z0, "and zooms out");
         }
     }
 

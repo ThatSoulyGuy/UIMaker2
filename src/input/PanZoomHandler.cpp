@@ -7,6 +7,7 @@
 #include <QPoint>
 #include <Qt>
 #include <cmath>
+#include <algorithm>
 
 #include "input/EditorContext.hpp"
 #include "input/InputEvents.hpp"
@@ -100,11 +101,19 @@ InputResult PanZoomHandler::HandleWheel(const WheelEvent& event, EditorContext& 
 
 InputResult PanZoomHandler::HandlePinch(const QPoint& viewPos, double scaleFactor, EditorContext& ctx)
 {
-    if (!ctx.view || scaleFactor <= 0.0)
+    if (!ctx.view)
         return InputResult::NotConsumed();
 
-    // macOS reports pinch as an incremental fraction (+0.01 = 1% bigger).
-    ZoomAt(ctx.view, viewPos, 1.0 + scaleFactor);
+    // macOS reports pinch as an incremental fraction: POSITIVE when spreading
+    // fingers and NEGATIVE when pinching together. Guarding the sign of the
+    // increment therefore rejected every zoom-out - the whole gesture, silently.
+    // The thing that must stay positive is the resulting scale factor.
+    const double factor = 1.0 + scaleFactor;
+
+    if (factor <= 0.0)
+        return InputResult::NotConsumed();
+
+    ZoomAt(ctx.view, viewPos, factor);
 
     return InputResult::Consumed(Qt::ArrowCursor, true);
 }
@@ -122,12 +131,19 @@ void PanZoomHandler::ZoomAt(QGraphicsView* view, const QPoint& viewPos, double f
     QTransform t = view->transform();
 
     const double current = t.m11();
-    double clampedFactor = factor;
 
-    if (current * factor < m_minZoom)
-        clampedFactor = m_minZoom / current;
-    if (current * factor > m_maxZoom)
-        clampedFactor = m_maxZoom / current;
+    // current is a divisor below, and a degenerate or mirrored transform would
+    // otherwise produce inf/NaN and poison the view matrix.
+    if (!(current > 0.0))
+        return;
+
+    const double target = std::clamp(current * factor, m_minZoom, m_maxZoom);
+    double clampedFactor = target / current;
+
+    // A view parked outside the range by an unclamped fitInView must not have its
+    // gesture REVERSED by the clamp: only ever let the clamp shorten the move.
+    if ((factor < 1.0 && clampedFactor > 1.0) || (factor > 1.0 && clampedFactor < 1.0))
+        return;
 
     if (std::abs(clampedFactor - 1.0) < 1e-9)
         return;
