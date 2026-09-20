@@ -142,6 +142,12 @@ void IconComponent::ReloadPixmap()
 
     const QString candidate = AssetContext::Resolve(m_imagePath);
     QPixmap loaded(candidate);
+    // Normalise the device pixel ratio to 1 so size() is the true TEXEL count.
+    // Qt's @2x convention can hand back a pixmap reporting device pixels - a
+    // 200x20 image as 400x40 - which would double every texel index in the
+    // wrap/slice path and halve a calibrated unit.
+    if (!loaded.isNull())
+    loaded.setDevicePixelRatio(1.0);
 
     // Only a successful load is cached; a failure leaves m_resolvedPath
     // empty so Update() keeps retrying rather than negative-caching a

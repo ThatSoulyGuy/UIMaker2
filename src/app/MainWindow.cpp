@@ -33,6 +33,7 @@
 #include "components/TabContainerComponent.hpp"
 #include "core/GridSnap.hpp"
 #include "core/PixelModel.hpp"
+#include "core/PixelDraw.hpp"
 #include "core/UiElement.hpp"
 #include "core/Component.hpp"
 #include "components/TransformComponent.hpp"
@@ -1215,32 +1216,62 @@ void MainWindow::OnCalibrationPick(UiElement* element)
         return;
     }
 
-    // The texture must also be square: a single square virtual-pixel unit is
-    // only well-defined when one texel is square. (A square element showing a
-    // non-square texture would otherwise calibrate correctly on one axis only.)
-    if (tex.width() != tex.height())
-    {
-        QMessageBox::warning(this, "Calibrate",
-            QString("The texture must be square for a single pixel unit.\nThis one is %1 x %2 px.")
-                .arg(tex.width()).arg(tex.height()));
-        return;
-    }
-
     SceneElementItem* item = document ? document->GetItem(element) : nullptr;
     if (!item)
         return;
 
     const QSizeF sz = item->boundingRect().size();
-    if (std::abs(sz.width() - sz.height()) > 0.01)
+
+    if (sz.width() <= 0.0 || sz.height() <= 0.0)
+        return;
+
+    // Calibration derives ONE square virtual pixel from "this texture, shown at
+    // this size". Neither the texture nor the element has to be square - what
+    // has to hold is that the element preserves the texture's ASPECT, because
+    // that is exactly the condition under which a texel is square on screen.
+    //
+    // The old guard demanded both be square, which was over-strict even before
+    // wrapping and is simply wrong now: a 200x20 button skin on a 1000x100
+    // element is the normal case and calibrates perfectly.
+    const double unitX = sz.width() / double(tex.width());
+    const double unitY = sz.height() / double(tex.height());
+
+    // Relative tolerance: a half-percent mismatch is rounding, not distortion.
+    const double skew = std::abs(unitX - unitY) / std::max(unitX, unitY);
+
+    if (skew > 0.005)
     {
         QMessageBox::warning(this, "Calibrate",
-            QString("The image element must be square (width == height).\nThis one is %1 x %2 scene units.")
-                .arg(sz.width()).arg(sz.height()));
+            QString("This element does not preserve the texture's aspect, so one texel "
+                    "would not be square.\n\n"
+                    "Texture %1 x %2 px shown at %3 x %4 scene units\n"
+                    "implies %5 units/texel across and %6 down.\n\n"
+                    "Resize the element to the texture's aspect ratio and pick again.")
+                .arg(tex.width()).arg(tex.height())
+                .arg(sz.width()).arg(sz.height())
+                .arg(unitX, 0, 'g', 6).arg(unitY, 0, 'g', 6));
         return;
     }
 
-    // One virtual pixel = one texel: scene-units-per-texel = elementSize / textureResolution.
-    const double unit = sz.width() / static_cast<double>(tex.width());
+    // In Wrap mode the element is deliberately NOT the texture's size - the art
+    // tiles to fill it - so its size says nothing about how big a texel should
+    // be. Calibrating from one would be circular.
+    if (img->GetTextureFill() == PixelDraw::FillWrap)
+    {
+        const auto answer = QMessageBox::question(this, "Calibrate",
+            QString("This image is set to Wrap, so its texture already tiles at the current "
+                    "unit and its size does not imply a new one.\n\n"
+                    "Calibrate from it anyway (%1 units/texel)?")
+                .arg(unitX, 0, 'g', 6),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+
+        if (answer != QMessageBox::Yes)
+            return;
+    }
+
+    // One virtual pixel = one texel. Both axes agree to within tolerance by
+    // now, so average them rather than arbitrarily trusting the wider one.
+    const double unit = (unitX + unitY) * 0.5;
     if (unit <= 0.0)
         return;
 
@@ -1250,8 +1281,11 @@ void MainWindow::OnCalibrationPick(UiElement* element)
     SyncRenderModelChecks();
 
     QMessageBox::information(this, "Calibrate",
-        QString("Calibrated: 1 virtual pixel = %1 scene units\n(%2 px texture shown at %3 scene units).")
-            .arg(unit).arg(tex.width()).arg(sz.width()));
+        QString("Calibrated: 1 virtual pixel = %1 scene units.\n\n"
+                "%2 x %3 px texture shown at %4 x %5 scene units.")
+            .arg(unit, 0, 'g', 6)
+            .arg(tex.width()).arg(tex.height())
+            .arg(sz.width()).arg(sz.height()));
 }
 
 void MainWindow::SyncRenderModelChecks()

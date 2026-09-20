@@ -115,6 +115,12 @@ void DragSlotComponent::SetIconPath(const QString& v)
     if (!m_iconPath.isEmpty())
     {
         QPixmap loaded(AssetContext::Resolve(m_iconPath));
+        // Normalise the device pixel ratio to 1 so size() is the true TEXEL count.
+        // Qt's @2x convention can hand back a pixmap reporting device pixels - a
+        // 200x20 image as 400x40 - which would double every texel index in the
+        // wrap/slice path and halve a calibrated unit.
+        if (!loaded.isNull())
+        loaded.setDevicePixelRatio(1.0);
         if (!loaded.isNull())
             m_iconPixmap = loaded;
     }

@@ -126,6 +126,12 @@ void ButtonComponent::SetImagePath(const QString& v)
     if (!imagePath.isEmpty())
     {
         QPixmap loaded(AssetContext::Resolve(imagePath));
+        // Normalise the device pixel ratio to 1 so size() is the true TEXEL count.
+        // Qt's @2x convention can hand back a pixmap reporting device pixels - a
+        // 200x20 image as 400x40 - which would double every texel index in the
+        // wrap/slice path and halve a calibrated unit.
+        if (!loaded.isNull())
+        loaded.setDevicePixelRatio(1.0);
         if (!loaded.isNull())
             customSkin = loaded;
     }
