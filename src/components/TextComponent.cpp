@@ -1,5 +1,7 @@
 #include "components/TextComponent.hpp"
 
+#include "core/TextOffset.hpp"
+
 #include <QFont>
 #include <QFontMetrics>
 #include <QFontDatabase>
@@ -58,17 +60,21 @@ bool TextComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
 
     painter->setClipRect(rect);
 
+    // The clip stays the ELEMENT rect, so nudging text past the edge clips it
+    // rather than letting it escape the element's bounds.
+    const QRectF textRect = TextOffset::Apply(rect, m_textOffset);
+
     if (hasBackground)
     {
         const qreal offset = qMax(1.0, pixelSize / 16.0);
         painter->save();
         painter->translate(offset, offset);
         painter->setPen(QColor(0, 0, 0, 160));
-        painter->drawText(rect, a, text);
+        painter->drawText(textRect, a, text);
         painter->restore();
     }
 
-    painter->drawText(rect, a, text);
+    painter->drawText(textRect, a, text);
 
     if (selected)
     {
@@ -233,6 +239,21 @@ void TextComponent::SetAssetRegistryValue(const QString& v)
     NotifyChanged();
 }
 
+QPointF TextComponent::GetTextOffset() const noexcept
+{
+    return m_textOffset;
+}
+
+void TextComponent::SetTextOffset(const QPointF& v)
+{
+    if (m_textOffset == v)
+        return;
+
+    m_textOffset = v;
+
+    NotifyChanged();
+}
+
 void TextComponent::ToJson(QJsonObject& out) const
 {
     out["kind"] = "Text";
@@ -245,6 +266,8 @@ void TextComponent::ToJson(QJsonObject& out) const
     out["assetRegistryValue"] = assetRegistryValue;
     out["alignment"] = static_cast<int>(alignment);
     out["hasBackground"] = hasBackground;
+    out["textOffsetX"] = m_textOffset.x();
+    out["textOffsetY"] = m_textOffset.y();
 }
 
 void TextComponent::FromJson(const QJsonObject& in)
@@ -258,4 +281,5 @@ void TextComponent::FromJson(const QJsonObject& in)
     SetAssetRegistryValue(in["assetRegistryValue"].toString());
     SetAlignment(static_cast<AnchorFlags>(in["alignment"].toInt(static_cast<int>((int)Anchor::LEFT | (int)Anchor::TOP))));
     SetHasBackground(in["hasBackground"].toBool(false));
+    SetTextOffset(QPointF(in["textOffsetX"].toDouble(0.0), in["textOffsetY"].toDouble(0.0)));
 }

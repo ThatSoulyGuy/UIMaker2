@@ -13,6 +13,13 @@
 class ImageComponent : public Component
 {
     Q_OBJECT
+
+    // Inspector grouping only; see GroupsFor in ui/PropertyEditorPanel.cpp.
+    // Property names are the .uibin field names and are deliberately untouched.
+    Q_CLASSINFO("propertyGroup/primaryImage", "imagePath=path,assetDomain=domain,assetRegistryValue=registryValue")
+    Q_CLASSINFO("propertyGroup/slice", "sliceLeft=left,sliceTop=top,sliceRight=right,sliceBottom=bottom")
+    Q_CLASSINFO("propertyGroup/textureWrap", "textureFill=fill,cropAnchor=anchor,cropOffsetX=offsetX,cropOffsetY=offsetY")
+
     Q_PROPERTY(QString imagePath READ GetImagePath WRITE SetImagePath NOTIFY ComponentChanged)
     Q_PROPERTY(QColor tint READ GetTint WRITE SetTint NOTIFY ComponentChanged)
     Q_PROPERTY(QString assetDomain READ GetAssetDomain WRITE SetAssetDomain NOTIFY ComponentChanged)

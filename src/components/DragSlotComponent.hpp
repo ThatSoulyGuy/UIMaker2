@@ -14,6 +14,10 @@ class DragSlotComponent : public Component
 {
     Q_OBJECT
 
+    Q_CLASSINFO("propertyGroup/icon", "iconPath=path,assetDomain=domain,assetRegistryValue=registryValue")
+    Q_CLASSINFO("propertyGroup/slice", "sliceLeft=left,sliceTop=top,sliceRight=right,sliceBottom=bottom")
+    Q_CLASSINFO("propertyGroup/textureWrap", "textureFill=fill,cropAnchor=anchor,cropOffsetX=offsetX,cropOffsetY=offsetY")
+
     Q_PROPERTY(int slotSize READ GetSlotSize WRITE SetSlotSize NOTIFY ComponentChanged)
     Q_PROPERTY(QColor backgroundColor READ GetBackgroundColor WRITE SetBackgroundColor NOTIFY ComponentChanged)
     Q_PROPERTY(QColor borderColor READ GetBorderColor WRITE SetBorderColor NOTIFY ComponentChanged)

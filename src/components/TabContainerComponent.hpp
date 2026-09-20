@@ -7,6 +7,7 @@
 #include <QFontMetrics>
 #include <QPainter>
 #include <QPen>
+#include <QPointF>
 
 #include "core/Component.hpp"
 
@@ -21,6 +22,7 @@ class TabContainerComponent : public Component
     Q_PROPERTY(QColor inactiveColor READ GetInactiveColor WRITE SetInactiveColor NOTIFY ComponentChanged)
     Q_PROPERTY(QColor textColor READ GetTextColor WRITE SetTextColor NOTIFY ComponentChanged)
     Q_PROPERTY(QColor backgroundColor READ GetBackgroundColor WRITE SetBackgroundColor NOTIFY ComponentChanged)
+    Q_PROPERTY(QPointF textOffset READ GetTextOffset WRITE SetTextOffset NOTIFY ComponentChanged)
 
 public:
 
@@ -53,6 +55,10 @@ public:
     QColor GetBackgroundColor() const noexcept;
     void SetBackgroundColor(const QColor& v);
 
+    // Nudge applied to the glyph box only; see core/TextOffset.hpp.
+    QPointF GetTextOffset() const noexcept;
+    void SetTextOffset(const QPointF& v);
+
     void ToJson(QJsonObject& out) const override;
 
     void FromJson(const QJsonObject& in) override;
@@ -66,6 +72,7 @@ private:
     QColor m_inactiveColor;
     QColor m_textColor;
     QColor m_backgroundColor;
+    QPointF m_textOffset;
 };
 
 #endif

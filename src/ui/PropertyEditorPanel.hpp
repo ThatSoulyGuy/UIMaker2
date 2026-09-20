@@ -7,11 +7,14 @@
 #include <QByteArray>
 #include <QString>
 #include <QList>
+#include <QHash>
 
 class UiElement;
-class QScrollArea;
-class QVBoxLayout;
+class QLabel;
 class QMetaProperty;
+class QTreeWidget;
+class QTreeWidgetItem;
+class Component;
 
 // One object's (before, after) values for a single property edit made through
 // the panel. MainWindow turns the list emitted by PropertyChangeApplied into
@@ -75,6 +78,25 @@ private:
     void Rebuild();
     QWidget* EditorForProperty(QObject* object, const QMetaProperty& prop, bool mixed = false);
 
+    // A branch node: a component, or a property group inside one. QTreeWidget
+    // draws the disclosure indicator itself, at whatever size the platform
+    // style says - which is the whole reason the panel is a tree.
+    void FitNameColumn();
+
+    QTreeWidgetItem* AddNode(QTreeWidgetItem* parent, const QString& label,
+                             const QString& stateKey, bool expandedByDefault);
+
+    // A leaf: the property's label in column 0, its editor widget in column 1.
+    void AddPropertyRow(QTreeWidgetItem* parent, QObject* object,
+                        const QMetaProperty& prop, const QString& label, bool mixed);
+
+    // Fill one component's node. Properties a component has declared as
+    // belonging to a group (Q_CLASSINFO "propertyGroup/...") become a child
+    // node in place of the first of them, so a twenty-row Button reads as
+    // eight. Shared by the single- and multi-selection paths, which differ
+    // only in the "mixed" marking.
+    void BuildComponentRows(Component* component, QTreeWidgetItem* node, bool multiSelect);
+
 private slots:
 
     void OnComponentChanged();
@@ -83,9 +105,14 @@ private:
 
     UiElement* target;
     QList<UiElement*> targets;
-    QScrollArea* scrollArea;
-    QWidget* container;
-    QVBoxLayout* layout;
+
+    // The whole panel is one tree: components are top-level nodes, their
+    // properties are leaves, and a property group is a node between them.
+    QTreeWidget* tree;
+
+    // Sits above the tree for the things that are not properties: the
+    // multi-selection notice, and the explanation on a locked slot.
+    QLabel* banner;
 
     bool suppressRebuild = false;
     bool pendingRebuild = false;
@@ -98,6 +125,23 @@ private:
     // False while a viewport transform is in flight: the panel holds still and
     // refreshes once on mouse-up instead of rebuilding per frame.
     bool live = true;
+
+    // Nodes the user has explicitly opened or closed, keyed
+    // "<componentKind>" or "<componentKind>/<group>". Absent means "as the
+    // node type defaults": components open, groups closed.
+    //
+    // The panel rebuilds its whole widget tree constantly (every queued
+    // ComponentChanged), so this has to live out here or every node would
+    // snap back the moment anything changed.
+    QHash<QString, bool> nodeExpansion;
+
+    // The name column fits itself to the longest label until the user drags
+    // the divider, after which it is theirs. Without the auto-fit, nesting a
+    // property one level deeper elided its name ("registryV..."); without the
+    // hand-off, the width they chose would be overwritten by the next rebuild,
+    // and there is one of those per queued ComponentChanged.
+    bool autoColumnWidth = true;
+    bool adjustingColumns = false;
 };
 
 #endif

@@ -8,6 +8,8 @@
 #include "scene/SceneExporter.hpp"
 #include "components/TransformComponent.hpp"
 #include "ui/PropertyEditorPanel.hpp"
+#include "components/TabContainerComponent.hpp"
+#include "components/RadialMenuComponent.hpp"
 #include "ui/EntityTreeModel.hpp"
 #include "input/TransformInputHandler.hpp"
 #include "input/EditorContext.hpp"
@@ -45,6 +47,9 @@
 #include <QTemporaryDir>
 #include "core/UiElement.hpp"
 
+#include <QTreeView>
+#include <QMimeData>
+#include <QtGlobal>
 #include <QApplication>
 #include <QStringList>
 #include "checks.hpp"
@@ -851,4 +856,119 @@ void CheckRegressions()
               "per-element load cost stays flat as the scene grows (linear, not quadratic)");
     }
 
+}
+
+// ---- hierarchy model reset balance --------------------------------------
+namespace
+{
+    int g_resetWarnings = 0;
+    QtMessageHandler g_prevHandler = nullptr;
+
+    void CountResetWarnings(QtMsgType t, const QMessageLogContext& c, const QString& m)
+    {
+        if (m.contains(QLatin1String("ResetModel")))
+            ++g_resetWarnings;
+
+        if (g_prevHandler)
+            g_prevHandler(t, c, m);
+    }
+}
+
+void CheckTreeModelReset()
+{
+    std::fprintf(stderr, "hierarchy model reset balance\n");
+
+    g_resetWarnings = 0;
+    g_prevHandler = qInstallMessageHandler(CountResetWarnings);
+
+    {
+        SceneDocument doc;
+
+        // Exactly MainWindow's wiring: the model resets on the root's
+        // StructureChanged, and the view expands itself whenever it does.
+        auto* model = new EntityTreeModel(doc.GetRoot(), nullptr);
+
+        QTreeView view;
+        view.setModel(model);
+        view.show();
+
+        QObject::connect(model, &EntityTreeModel::HierarchyChanged, &view, [&view]()
+        {
+            view.expandAll();
+        });
+
+        Settle();
+
+        UiElement* tabs = doc.CreateTabContainerElement("Tabs", nullptr);
+        Settle();
+
+        auto* tc = tabs->GetComponent<TabContainerComponent>();
+
+        const char* const names[] = { "A", "A,B", "A,B,C", "A,B", "A", "A,B,C,D" };
+
+        for (const char* n : names)
+        {
+            tc->SetTabNames(QString::fromLatin1(n));
+            Settle();
+        }
+
+        UiElement* radial = doc.CreateRadialMenuElement("Radial", nullptr);
+        Settle();
+
+        auto* rm = radial->GetComponent<RadialMenuComponent>();
+
+        for (int i = 2; i < 8; ++i)
+        {
+            rm->SetSliceCount(i);
+            Settle();
+        }
+
+        doc.DeleteElement(radial);
+        Settle();
+
+        // A hierarchy drag-and-drop: the view calls dropMimeData, which is the
+        // only place that runs code BETWEEN begin and endResetModel.
+        UiElement* a = doc.CreatePanelElement("A", nullptr);
+        UiElement* b = doc.CreatePanelElement("B", nullptr);
+        Settle();
+
+        int hierarchyChanges = 0;
+        int reparents = 0;
+
+        QObject::connect(model, &EntityTreeModel::HierarchyChanged, model,
+                         [&hierarchyChanges]() { ++hierarchyChanges; });
+        QObject::connect(model, &EntityTreeModel::ElementReparented, model,
+                         [&reparents]() { ++reparents; });
+
+        QMimeData* mime = new QMimeData();
+        mime->setData("application/x-uielement-id",
+                      b->GetId().toString(QUuid::WithoutBraces).toUtf8());
+
+        const bool dropped = model->dropMimeData(mime, Qt::MoveAction, 0, 0,
+                                                 model->GetIndexFromElement(a));
+        Settle();
+
+        delete mime;
+
+        // Suppressing the nested reset must not suppress the WORK. The drop
+        // has to still move the element, still tell the view, and still
+        // produce the undo record.
+        check(dropped, "the drop is accepted");
+        check(b->parent() == a, "and the element really moved under its new parent");
+        check(reparents == 1, "and emits exactly one ElementReparented for the undo stack");
+        check(hierarchyChanges >= 1, "and announces the change so the view refreshes");
+
+        if (!(b->parent() == a) || reparents != 1)
+            std::fprintf(stderr, "      dropped=%d reparents=%d hierarchyChanges=%d\n",
+                         int(dropped), reparents, hierarchyChanges);
+
+        delete model;
+    }
+
+    qInstallMessageHandler(g_prevHandler);
+
+    check(g_resetWarnings == 0, "begin/endResetModel stay balanced on the hierarchy model");
+
+    if (g_resetWarnings)
+        std::fprintf(stderr, "      %d unbalanced-reset warnings\n", g_resetWarnings);
 }

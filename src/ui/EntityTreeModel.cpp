@@ -193,13 +193,16 @@ bool EntityTreeModel::dropMimeData(const QMimeData* data, Qt::DropAction action,
     if (oldParent == parentElement && oldRow >= 0 && insertRow > oldRow)
         --insertRow;
 
-    beginResetModel();
-    const bool moved = moving->ReparentTo(parentElement, insertRow);
-    endResetModel();
+    bool moved = false;
 
-    ConnectNameSignals(root);
+    {
+        // ReparentTo emits StructureChanged, which re-enters OnStructureChanged
+        // while this reset is open. The scope makes that nested reset a no-op
+        // instead of closing this one out from under us.
+        StructuralReset reset(this);
 
-    emit HierarchyChanged();
+        moved = moving->ReparentTo(parentElement, insertRow);
+    }
 
     if (moved)
     {
@@ -249,10 +252,8 @@ QModelIndex EntityTreeModel::GetIndexFromElement(UiElement* element) const
 
 void EntityTreeModel::OnStructureChanged()
 {
-    beginResetModel();
-    endResetModel();
-
-    ConnectNameSignals(root);
-
-    emit HierarchyChanged();
+    // The scope does the whole job: reset, re-wire name signals, announce.
+    // Nested inside a reset that is already open (a drag-drop reparent), this
+    // is deliberately a no-op - the enclosing scope covers the same change.
+    StructuralReset reset(this);
 }

@@ -1,4 +1,6 @@
 #include "components/ToggleComponent.hpp"
+
+#include "core/TextOffset.hpp"
 #include "core/PixelDraw.hpp"
 #include "core/PixelModel.hpp"
 
@@ -72,7 +74,9 @@ bool ToggleComponent::Paint(QPainter* painter, const QRectF& rect, bool selected
         painter->setFont(font);
         painter->setPen(Qt::white);
 
-        QRectF textRect(rect.x() + trackW + 8.0, rect.y(), rect.width() - trackW - 8.0, rect.height());
+        QRectF textRect = TextOffset::Apply(
+            QRectF(rect.x() + trackW + 8.0, rect.y(), rect.width() - trackW - 8.0, rect.height()),
+            m_textOffset);
         painter->drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, m_label);
     }
 
@@ -104,6 +108,21 @@ void ToggleComponent::SetKnobColor(const QColor& v) { if (m_knobColor == v) retu
 QString ToggleComponent::GetLabel() const noexcept { return m_label; }
 void ToggleComponent::SetLabel(const QString& v) { if (m_label == v) return; m_label = v; NotifyChanged(); }
 
+QPointF ToggleComponent::GetTextOffset() const noexcept
+{
+    return m_textOffset;
+}
+
+void ToggleComponent::SetTextOffset(const QPointF& v)
+{
+    if (m_textOffset == v)
+        return;
+
+    m_textOffset = v;
+
+    NotifyChanged();
+}
+
 void ToggleComponent::ToJson(QJsonObject& out) const
 {
     out["kind"] = "Toggle";
@@ -112,6 +131,8 @@ void ToggleComponent::ToJson(QJsonObject& out) const
     out["offColor"] = m_offColor.name(QColor::HexArgb);
     out["knobColor"] = m_knobColor.name(QColor::HexArgb);
     out["label"] = m_label;
+    out["textOffsetX"] = m_textOffset.x();
+    out["textOffsetY"] = m_textOffset.y();
 }
 
 void ToggleComponent::FromJson(const QJsonObject& in)
@@ -121,4 +142,5 @@ void ToggleComponent::FromJson(const QJsonObject& in)
     SetOffColor(QColor(in["offColor"].toString("#FF50505A")));
     SetKnobColor(QColor(in["knobColor"].toString("#FFFFFFFF")));
     SetLabel(in["label"].toString("Toggle"));
+    SetTextOffset(QPointF(in["textOffsetX"].toDouble(0.0), in["textOffsetY"].toDouble(0.0)));
 }

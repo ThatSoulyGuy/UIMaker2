@@ -379,6 +379,13 @@
          also means a property added to a shared base class would silently
          vanish from every baked file.
 
+  R10.1a A property's NAME is its field name, and the catalogue in section 12
+         is written in those names. A producer MUST NOT rename a property to
+         suit its own presentation - an editor that groups related fields
+         under a heading, for example, MUST carry that grouping beside the
+         properties rather than in them. Renaming is a format change and
+         requires a version bump.
+
 10.2  Per-property algorithm
 
   For each property in declaration order:
@@ -606,6 +613,7 @@
     fontPath         ASSET_REF  0xFFFFFFFF
     alignment        INT32      5            anchor bitmask, see section 14
     hasBackground    BOOL       false        see section 14
+    textOffset       POINT      (0, 0)       glyph nudge, see 14.5
 
   Button
     text             STRING     "Button"
@@ -625,10 +633,7 @@
     cropAnchor       INT32      4
     cropOffsetX      INT32      0
     cropOffsetY      INT32      0
-    sliceLeft        INT32      0
-    sliceTop         INT32      0
-    sliceRight       INT32      0
-    sliceBottom      INT32      0
+    textOffset       POINT      (0, 0)       glyph nudge, see 14.5
 
     backgroundColor is NOT painted directly. When imagePath resolves to no
     asset, the reference renderer generates a default skin from it: a vertical
@@ -652,6 +657,7 @@
     offColor         COLOR      0xFF50505A
     knobColor        COLOR      0xFFFFFFFF
     label            STRING     "Toggle"
+    textOffset       POINT      (0, 0)       glyph nudge, see 14.5
 
   Dropdown
     options          STRING     "Option A,Option B,Option C"   comma-separated
@@ -661,6 +667,7 @@
     borderColor      COLOR      0xFF5A5A64
     fontFamily       STRING     "Inter"
     pixelSize        INT32      16
+    textOffset       POINT      (0, 0)       glyph nudge, see 14.5
 
     Empty entries are discarded when splitting, so an empty option shifts the
     indices that selectedIndex refers to.
@@ -674,6 +681,7 @@
     borderColor      COLOR      0xFF50505A
     fontFamily       STRING     "Inter"
     pixelSize        INT32      16
+    textOffset       POINT      (0, 0)       glyph nudge, see 14.5
 
   Icon
     imagePath        ASSET_REF  0xFFFFFFFF
@@ -716,6 +724,7 @@
     borderColor      COLOR      0xFF50505A
     fontFamily       STRING     "Inter"
     pixelSize        INT32      13
+    textOffset       POINT      (0, 0)       glyph nudge, see 14.5
 
   Modal
     overlayColor     COLOR      0x8C000000
@@ -732,6 +741,7 @@
     inactiveColor    COLOR      0xFF28282D
     textColor        COLOR      0xFFFFFFFF
     backgroundColor  COLOR      0xFF323237
+    textOffset       POINT      (0, 0)       glyph nudge, see 14.5
 
   RadialMenu
     sliceCount       INT32      6
@@ -777,6 +787,7 @@
     itemColor        COLOR      0xFF2D2D34
     alternateColor   COLOR      0xFF32323A
     borderColor      COLOR      0xFF464650
+    textOffset       POINT      (0, 0)       glyph nudge, see 14.5
 
     itemHeight is the extent along whichever axis the list runs, so in
     Horizontal mode it is the item WIDTH. itemCount and labels are independent:
@@ -967,9 +978,16 @@
   14. Text rendering
 --------------------------------------------------------------------------------
 
-  Two component types carry glyph runs: Text and Button. They share the font
-  resolution rules and differ in which colour field names the glyph fill -
-  Text.color versus Button.textColor.
+  Eight component types carry glyph runs drawn from author-supplied strings:
+
+      Text          text            Tooltip        tooltipText
+      Button        text            TabContainer   tabNames (split on ',')
+      TextInput     text, placeholder  Toggle      label
+      Dropdown      options (split on ',')  ListRepeater  labels (split on ',')
+
+  All eight carry textOffset (14.5). Text and Button additionally share the
+  font resolution rules of 14.1 and differ only in which colour field names
+  the glyph fill - Text.color versus Button.textColor.
 
 14.1  Font resolution
 
@@ -1021,6 +1039,39 @@
          max(1, pixelSize / 16) pixels on both axes, in rgba(0, 0, 0, 160).
          It is a translucent drop shadow, not an opaque backdrop. A consumer
          MAY substitute an equivalent legibility treatment.
+
+14.5  textOffset
+
+  A nudge applied to the RECTANGLE the glyphs are laid out in, in scene units
+  - the same space as the element rect and as pixelSize, not texels.
+
+  It exists because the glyph box a component computes is rarely where a given
+  face wants to sit: a 9-sliced skin has an optical centre unrelated to its
+  geometric one, and a bitmap face's baseline can sit a pixel or two off from
+  where the metrics put it. Without it the only remedies were moving the whole
+  element - which moves the skin with it - or padding the string with spaces.
+
+  R14.8  CONSUMER MUST translate the GLYPH rect by textOffset and nothing
+         else. Alignment (14.3) then resolves inside the translated rect,
+         which is the same result as resolving it first and translating the
+         run, because a translation is rigid. The element's own rect, its
+         background, its skin and its border MUST NOT move.
+  R14.9  CONSUMER MUST NOT grow the element to accommodate a nudged run. A
+         consumer that clips text to the element's bounds MUST keep clipping
+         at the UNSHIFTED bounds, so an offset can push glyphs out of view.
+         That is the intended behaviour, not an error.
+  R14.10 When Document.renderModel is 1 (PixelGrid), CONSUMER MUST round each
+         axis of textOffset to a whole virtual pixel BEFORE applying it:
+
+             applied = round(value / unit) * unit
+
+         with `unit` as defined in R13.4, and round() breaking ties away from
+         zero. A fractional nudge is precisely what that mode exists to
+         prevent. When renderModel is 0 the offset MUST be applied exactly:
+         sub-pixel placement is the reason that mode exists.
+  R14.11 A component whose field table omits textOffset has no nudge. CONSUMER
+         MUST treat an absent field as (0, 0), which is also the default, so
+         a file written before this field existed renders unchanged.
 
 
 --------------------------------------------------------------------------------
@@ -1114,6 +1165,8 @@
   [ ] treat out-of-range asset indices as absent                    R9.6
   [ ] never fail the load because one asset is unresolvable         R6.1
   [ ] clamp pixelSize to >= 1                                       R14.5
+  [ ] move the glyph rect for textOffset, nothing else              R14.8, R14.9
+  [ ] round textOffset to whole virtual pixels in PixelGrid mode    R14.10
   [ ] resolve anchors and alignment with the stated precedence      R11.3
   [ ] re-run layouts and ignore stored child positions              R15.1
   [ ] use the FINAL size for anchoring and rotation                 R11.5

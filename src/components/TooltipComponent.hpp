@@ -3,6 +3,7 @@
 
 #include <QColor>
 #include <QString>
+#include <QPointF>
 
 #include "core/Component.hpp"
 
@@ -16,6 +17,7 @@ class TooltipComponent : public Component
     Q_PROPERTY(QColor borderColor READ GetBorderColor WRITE SetBorderColor NOTIFY ComponentChanged)
     Q_PROPERTY(QString fontFamily READ GetFontFamily WRITE SetFontFamily NOTIFY ComponentChanged)
     Q_PROPERTY(int pixelSize READ GetPixelSize WRITE SetPixelSize NOTIFY ComponentChanged)
+    Q_PROPERTY(QPointF textOffset READ GetTextOffset WRITE SetTextOffset NOTIFY ComponentChanged)
 
 public:
 
@@ -45,6 +47,10 @@ public:
     int GetPixelSize() const noexcept;
     void SetPixelSize(int v);
 
+    // Nudge applied to the glyph box only; see core/TextOffset.hpp.
+    QPointF GetTextOffset() const noexcept;
+    void SetTextOffset(const QPointF& v);
+
     void ToJson(QJsonObject& out) const override;
 
     void FromJson(const QJsonObject& in) override;
@@ -57,6 +63,7 @@ private:
     QColor m_borderColor;
     QString m_fontFamily;
     int m_pixelSize;
+    QPointF m_textOffset;
 };
 
 #endif

@@ -13,6 +13,10 @@ class IconComponent : public Component
 {
     Q_OBJECT
 
+    Q_CLASSINFO("propertyGroup/primaryImage", "imagePath=path,assetDomain=domain,assetRegistryValue=registryValue")
+    Q_CLASSINFO("propertyGroup/slice", "sliceLeft=left,sliceTop=top,sliceRight=right,sliceBottom=bottom")
+    Q_CLASSINFO("propertyGroup/textureWrap", "textureFill=fill,cropAnchor=anchor,cropOffsetX=offsetX,cropOffsetY=offsetY")
+
     Q_PROPERTY(QString imagePath READ GetImagePath WRITE SetImagePath NOTIFY ComponentChanged)
     Q_PROPERTY(QColor tintColor READ GetTintColor WRITE SetTintColor NOTIFY ComponentChanged)
     Q_PROPERTY(int iconSize READ GetIconSize WRITE SetIconSize NOTIFY ComponentChanged)

@@ -45,6 +45,8 @@ set(UIMAKER_SOURCES
     src/core/PixelDraw.cpp
     src/core/SpriteSidecar.hpp
     src/core/SpriteSidecar.cpp
+    src/core/TextOffset.hpp
+    src/core/TextOffset.cpp
 
     # Components
     src/components/DocumentComponent.hpp
@@ -178,6 +180,7 @@ qt_add_executable(UIMaker2Checks
     tools/checks/checks.hpp
     tools/checks/regressions.cpp
     tools/checks/pixelspans.cpp
+    tools/checks/textoffset.cpp
     ${UIMAKER_SOURCES}
 )
 

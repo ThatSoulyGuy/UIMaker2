@@ -17,5 +17,8 @@ void CheckPixelSpans();
 void CheckPixelRaster();
 void CheckDocumentBake();
 void CheckUiBinConformance();
+void CheckTextOffset();
+void CheckPropertyGroups();
+void CheckTreeModelReset();
 
 #endif

@@ -4,6 +4,7 @@
 #include <QString>
 #include <QColor>
 #include <QPixmap>
+#include <QPointF>
 
 #include "core/Component.hpp"
 #include "core/PixelDraw.hpp"
@@ -11,6 +12,14 @@
 class ButtonComponent : public Component
 {
     Q_OBJECT
+
+    // Inspector grouping only; see GroupsFor in ui/PropertyEditorPanel.cpp.
+    // Property names are the .uibin field names and are deliberately untouched.
+    Q_CLASSINFO("propertyGroup/font", "fontPath=path,fontDomain=domain,fontRegistryValue=registryValue")
+    Q_CLASSINFO("propertyGroup/skinImage", "imagePath=path,assetDomain=domain,assetRegistryValue=registryValue")
+    Q_CLASSINFO("propertyGroup/slice", "sliceLeft=left,sliceTop=top,sliceRight=right,sliceBottom=bottom")
+    Q_CLASSINFO("propertyGroup/textureWrap", "textureFill=fill,cropAnchor=anchor,cropOffsetX=offsetX,cropOffsetY=offsetY")
+
     Q_PROPERTY(QString text READ GetText WRITE SetText NOTIFY ComponentChanged)
     Q_PROPERTY(QColor backgroundColor READ GetBackgroundColor WRITE SetBackgroundColor NOTIFY ComponentChanged)
     Q_PROPERTY(QColor textColor READ GetTextColor WRITE SetTextColor NOTIFY ComponentChanged)
@@ -37,6 +46,7 @@ class ButtonComponent : public Component
     Q_PROPERTY(int cropAnchor READ GetCropAnchor WRITE SetCropAnchor NOTIFY ComponentChanged)
     Q_PROPERTY(int cropOffsetX READ GetCropOffsetX WRITE SetCropOffsetX NOTIFY ComponentChanged)
     Q_PROPERTY(int cropOffsetY READ GetCropOffsetY WRITE SetCropOffsetY NOTIFY ComponentChanged)
+    Q_PROPERTY(QPointF textOffset READ GetTextOffset WRITE SetTextOffset NOTIFY ComponentChanged)
 
 public:
 
@@ -95,6 +105,10 @@ public:
     // is adopted into the properties, which are what the engine actually gets.
     void AdoptSidecarSlice(const QString& path);
 
+    // Nudge applied to the glyph box only; see core/TextOffset.hpp.
+    QPointF GetTextOffset() const noexcept;
+    void SetTextOffset(const QPointF& v);
+
     void ToJson(QJsonObject& out) const override;
 
     void FromJson(const QJsonObject& in) override;
@@ -143,6 +157,7 @@ private:
     int sliceRight  = 6;
     int sliceBottom = 6;
 
+    QPointF m_textOffset;
 };
 
 #endif

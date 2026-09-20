@@ -1,4 +1,6 @@
 #include "components/ButtonComponent.hpp"
+
+#include "core/TextOffset.hpp"
 #include "core/PixelDraw.hpp"
 #include "core/SpriteSidecar.hpp"
 #include "core/PixelModel.hpp"
@@ -65,7 +67,7 @@ bool ButtonComponent::Paint(QPainter* painter, const QRectF& rect, bool selected
     font.setPixelSize(pixelSize);
 
     painter->setFont(font);
-    painter->drawText(rect, Qt::AlignCenter, text);
+    painter->drawText(TextOffset::Apply(rect, m_textOffset), Qt::AlignCenter, text);
 
     if (selected)
     {
@@ -144,6 +146,21 @@ void ButtonComponent::SetSliceTop(int v) { v = std::max(0, v); if (sliceTop == v
 void ButtonComponent::SetSliceRight(int v) { v = std::max(0, v); if (sliceRight == v) return; sliceRight = v; InvalidateDefaultSkin(); NotifyChanged(); }
 void ButtonComponent::SetSliceBottom(int v) { v = std::max(0, v); if (sliceBottom == v) return; sliceBottom = v; InvalidateDefaultSkin(); NotifyChanged(); }
 
+QPointF ButtonComponent::GetTextOffset() const noexcept
+{
+    return m_textOffset;
+}
+
+void ButtonComponent::SetTextOffset(const QPointF& v)
+{
+    if (m_textOffset == v)
+        return;
+
+    m_textOffset = v;
+
+    NotifyChanged();
+}
+
 void ButtonComponent::ToJson(QJsonObject& out) const
 {
     out["kind"] = "Button";
@@ -166,6 +183,8 @@ void ButtonComponent::ToJson(QJsonObject& out) const
     out["cropAnchor"] = tex.anchor;
     out["cropOffsetX"] = tex.cropOffsetX;
     out["cropOffsetY"] = tex.cropOffsetY;
+    out["textOffsetX"] = m_textOffset.x();
+    out["textOffsetY"] = m_textOffset.y();
 }
 
 void ButtonComponent::FromJson(const QJsonObject& in)
@@ -189,6 +208,7 @@ void ButtonComponent::FromJson(const QJsonObject& in)
     SetCropAnchor(in["cropAnchor"].toInt(PixelDraw::Center));
     SetCropOffsetX(in["cropOffsetX"].toInt(0));
     SetCropOffsetY(in["cropOffsetY"].toInt(0));
+    SetTextOffset(QPointF(in["textOffsetX"].toDouble(0.0), in["textOffsetY"].toDouble(0.0)));
 }
 
 void ButtonComponent::InvalidateDefaultSkin() { defaultSkin = QPixmap(); }

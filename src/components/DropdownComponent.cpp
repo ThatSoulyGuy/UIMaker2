@@ -1,4 +1,6 @@
 #include "components/DropdownComponent.hpp"
+
+#include "core/TextOffset.hpp"
 #include "core/PixelDraw.hpp"
 #include "core/PixelModel.hpp"
 
@@ -67,7 +69,7 @@ bool DropdownComponent::Paint(QPainter* painter, const QRectF& rect, bool select
     QString displayText = (m_selectedIndex >= 0 && m_selectedIndex < items.size())
         ? items[m_selectedIndex].trimmed() : "Select...";
 
-    QRectF textRect = rect.adjusted(8, 0, -24, 0);
+    QRectF textRect = TextOffset::Apply(rect.adjusted(8, 0, -24, 0), m_textOffset);
     painter->drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft, displayText);
 
     // Draw dropdown arrow
@@ -115,6 +117,21 @@ void DropdownComponent::SetFontFamily(const QString& v) { if (m_fontFamily == v)
 int DropdownComponent::GetPixelSize() const noexcept { return m_pixelSize; }
 void DropdownComponent::SetPixelSize(int v) { if (m_pixelSize == v) return; m_pixelSize = v; NotifyChanged(); }
 
+QPointF DropdownComponent::GetTextOffset() const noexcept
+{
+    return m_textOffset;
+}
+
+void DropdownComponent::SetTextOffset(const QPointF& v)
+{
+    if (m_textOffset == v)
+        return;
+
+    m_textOffset = v;
+
+    NotifyChanged();
+}
+
 void DropdownComponent::ToJson(QJsonObject& out) const
 {
     out["kind"] = "Dropdown";
@@ -125,6 +142,8 @@ void DropdownComponent::ToJson(QJsonObject& out) const
     out["borderColor"] = m_borderColor.name(QColor::HexArgb);
     out["fontFamily"] = m_fontFamily;
     out["pixelSize"] = m_pixelSize;
+    out["textOffsetX"] = m_textOffset.x();
+    out["textOffsetY"] = m_textOffset.y();
 }
 
 void DropdownComponent::FromJson(const QJsonObject& in)
@@ -136,4 +155,5 @@ void DropdownComponent::FromJson(const QJsonObject& in)
     SetBorderColor(QColor(in["borderColor"].toString("#FF5A5A64")));
     SetFontFamily(in["fontFamily"].toString("Inter"));
     SetPixelSize(in["pixelSize"].toInt(16));
+    SetTextOffset(QPointF(in["textOffsetX"].toDouble(0.0), in["textOffsetY"].toDouble(0.0)));
 }

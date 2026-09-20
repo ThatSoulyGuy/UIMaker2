@@ -37,6 +37,47 @@ public:
     UiElement* GetElementFromIndex(const QModelIndex& idx) const;
     QModelIndex GetIndexFromElement(UiElement* element) const;
 
+    // A model reset that nests safely.
+    //
+    // beginResetModel/endResetModel are not re-entrant, and dropMimeData has
+    // to hold one open across UiElement::ReparentTo - which itself emits
+    // StructureChanged, landing straight back in OnStructureChanged. The inner
+    // pair then closed the OUTER reset, so the outer endResetModel fired with
+    // nothing open and Qt logged, once per drag-and-drop:
+    //
+    //   beginResetModel called on EntityTreeModel without calling endResetModel first
+    //   endResetModel called on EntityTreeModel without calling beginResetModel first
+    //
+    // Only the outermost scope resets, and only it re-wires the name signals
+    // and announces the change - so the view is never asked to expand itself
+    // in the middle of a reset it has not been told is over.
+    //
+    // Same shape as SceneDocument::StructureBatch, for the same reason.
+    struct StructuralReset
+    {
+        explicit StructuralReset(EntityTreeModel* m) : model(m)
+        {
+            if (model && model->m_resetDepth++ == 0)
+                model->beginResetModel();
+        }
+
+        ~StructuralReset()
+        {
+            if (!model || --model->m_resetDepth > 0)
+                return;
+
+            model->endResetModel();
+            model->ConnectNameSignals(model->root);
+
+            emit model->HierarchyChanged();
+        }
+
+        StructuralReset(const StructuralReset&) = delete;
+        StructuralReset& operator=(const StructuralReset&) = delete;
+
+        EntityTreeModel* model;
+    };
+
 signals:
 
     void HierarchyChanged();
@@ -63,6 +104,9 @@ private:
     void ConnectNameSignals(UiElement* node);
 
     UiElement* root;
+
+    // Depth, not a bool, so a reset nested two deep still only closes once.
+    int m_resetDepth = 0;
 };
 
 #endif

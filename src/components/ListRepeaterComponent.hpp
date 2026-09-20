@@ -7,6 +7,7 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <algorithm>
+#include <QPointF>
 
 #include "core/Component.hpp"
 
@@ -22,6 +23,7 @@ class ListRepeaterComponent : public Component
     Q_PROPERTY(QColor itemColor READ GetItemColor WRITE SetItemColor NOTIFY ComponentChanged)
     Q_PROPERTY(QColor alternateColor READ GetAlternateColor WRITE SetAlternateColor NOTIFY ComponentChanged)
     Q_PROPERTY(QColor borderColor READ GetBorderColor WRITE SetBorderColor NOTIFY ComponentChanged)
+    Q_PROPERTY(QPointF textOffset READ GetTextOffset WRITE SetTextOffset NOTIFY ComponentChanged)
 
 public:
 
@@ -62,6 +64,10 @@ public:
     QColor GetBorderColor() const noexcept;
     void SetBorderColor(const QColor& v);
 
+    // Nudge applied to the glyph box only; see core/TextOffset.hpp.
+    QPointF GetTextOffset() const noexcept;
+    void SetTextOffset(const QPointF& v);
+
     void ToJson(QJsonObject& out) const override;
 
     void FromJson(const QJsonObject& in) override;
@@ -76,6 +82,7 @@ private:
     QColor m_itemColor;
     QColor m_alternateColor;
     QColor m_borderColor;
+    QPointF m_textOffset;
 };
 
 #endif

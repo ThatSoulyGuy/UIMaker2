@@ -1,4 +1,6 @@
 #include "components/TextInputComponent.hpp"
+
+#include "core/TextOffset.hpp"
 #include "core/PixelDraw.hpp"
 #include "core/PixelModel.hpp"
 
@@ -49,7 +51,7 @@ bool TextInputComponent::Paint(QPainter* painter, const QRectF& rect, bool selec
     font.setPixelSize(m_pixelSize);
     painter->setFont(font);
 
-    QRectF textRect = rect.adjusted(8, 0, -8, 0);
+    QRectF textRect = TextOffset::Apply(rect.adjusted(8, 0, -8, 0), m_textOffset);
 
     if (m_text.isEmpty())
     {
@@ -106,6 +108,21 @@ void TextInputComponent::SetFontFamily(const QString& v) { if (m_fontFamily == v
 int TextInputComponent::GetPixelSize() const noexcept { return m_pixelSize; }
 void TextInputComponent::SetPixelSize(int v) { if (m_pixelSize == v) return; m_pixelSize = v; NotifyChanged(); }
 
+QPointF TextInputComponent::GetTextOffset() const noexcept
+{
+    return m_textOffset;
+}
+
+void TextInputComponent::SetTextOffset(const QPointF& v)
+{
+    if (m_textOffset == v)
+        return;
+
+    m_textOffset = v;
+
+    NotifyChanged();
+}
+
 void TextInputComponent::ToJson(QJsonObject& out) const
 {
     out["kind"] = "TextInput";
@@ -117,6 +134,8 @@ void TextInputComponent::ToJson(QJsonObject& out) const
     out["borderColor"] = m_borderColor.name(QColor::HexArgb);
     out["fontFamily"] = m_fontFamily;
     out["pixelSize"] = m_pixelSize;
+    out["textOffsetX"] = m_textOffset.x();
+    out["textOffsetY"] = m_textOffset.y();
 }
 
 void TextInputComponent::FromJson(const QJsonObject& in)
@@ -129,4 +148,5 @@ void TextInputComponent::FromJson(const QJsonObject& in)
     SetBorderColor(QColor(in["borderColor"].toString("#FF50505A")));
     SetFontFamily(in["fontFamily"].toString("Inter"));
     SetPixelSize(in["pixelSize"].toInt(16));
+    SetTextOffset(QPointF(in["textOffsetX"].toDouble(0.0), in["textOffsetY"].toDouble(0.0)));
 }

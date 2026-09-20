@@ -1,4 +1,6 @@
 #include "components/TabContainerComponent.hpp"
+
+#include "core/TextOffset.hpp"
 #include "core/PixelModel.hpp"
 
 #include <algorithm>
@@ -86,7 +88,7 @@ bool TabContainerComponent::Paint(QPainter* painter, const QRectF& rect, bool se
 
         painter->setPen(m_textColor);
         QString label = (i < tabs.size()) ? tabs[i].trimmed() : QString("Tab %1").arg(i + 1);
-        painter->drawText(tabRect, Qt::AlignCenter, label);
+        painter->drawText(TextOffset::Apply(tabRect, m_textOffset), Qt::AlignCenter, label);
     }
 
     // Draw content area
@@ -131,6 +133,21 @@ void TabContainerComponent::SetTextColor(const QColor& v) { if (m_textColor == v
 QColor TabContainerComponent::GetBackgroundColor() const noexcept { return m_backgroundColor; }
 void TabContainerComponent::SetBackgroundColor(const QColor& v) { if (m_backgroundColor == v) return; m_backgroundColor = v; NotifyChanged(); }
 
+QPointF TabContainerComponent::GetTextOffset() const noexcept
+{
+    return m_textOffset;
+}
+
+void TabContainerComponent::SetTextOffset(const QPointF& v)
+{
+    if (m_textOffset == v)
+        return;
+
+    m_textOffset = v;
+
+    NotifyChanged();
+}
+
 void TabContainerComponent::ToJson(QJsonObject& out) const
 {
     out["kind"] = "TabContainer";
@@ -141,6 +158,8 @@ void TabContainerComponent::ToJson(QJsonObject& out) const
     out["inactiveColor"] = m_inactiveColor.name(QColor::HexArgb);
     out["textColor"] = m_textColor.name(QColor::HexArgb);
     out["backgroundColor"] = m_backgroundColor.name(QColor::HexArgb);
+    out["textOffsetX"] = m_textOffset.x();
+    out["textOffsetY"] = m_textOffset.y();
 }
 
 void TabContainerComponent::FromJson(const QJsonObject& in)
@@ -152,4 +171,5 @@ void TabContainerComponent::FromJson(const QJsonObject& in)
     SetInactiveColor(QColor(in["inactiveColor"].toString("#FF28282D")));
     SetTextColor(QColor(in["textColor"].toString("#FFFFFFFF")));
     SetBackgroundColor(QColor(in["backgroundColor"].toString("#FF323237")));
+    SetTextOffset(QPointF(in["textOffsetX"].toDouble(0.0), in["textOffsetY"].toDouble(0.0)));
 }

@@ -7,12 +7,9 @@
 #include <QMessageBox>
 #include <QApplication>
 #include <QLabel>
-#include <QGroupBox>
 #include <QCheckBox>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
-#include <QFormLayout>
-#include <QScrollArea>
 #include <QComboBox>
 #include <QLineEdit>
 #include <QDoubleSpinBox>
@@ -28,6 +25,10 @@
 #include <QSet>
 #include <QAbstractButton>
 #include <QScrollBar>
+#include <QTreeWidget>
+#include <QHeaderView>
+#include <QMetaClassInfo>
+#include <QHash>
 
 #include <limits>
 
@@ -47,6 +48,95 @@ static Component* ComponentOfKind(UiElement* el, const QString& kind)
 
 // True if the named property has the same value across the same-kind component of every
 // selected element. A property that is uniform needs no "mixed" annotation.
+namespace
+{
+    // One collapsible node in a component's property form: a display label and
+    // the properties that live under it, in the order the component listed
+    // them (which is the order that reads well, not necessarily declaration
+    // order).
+    struct PropertyGroup
+    {
+        QString label;
+        QList<QPair<QByteArray, QString>> leaves;   // property name -> leaf label
+    };
+
+    // Groups are declared on the component with Q_CLASSINFO, so the grouping
+    // sits next to the properties it describes and travels with them. The
+    // property NAMES are untouched - they are the .uibin field names that the
+    // spec catalogues, and renaming them to fake a hierarchy would change the
+    // format.
+    //
+    //   Q_CLASSINFO("propertyGroup/primaryImage",
+    //               "imagePath=path,assetDomain=domain,assetRegistryValue=registryValue")
+    //
+    // classInfoOffset() for the same reason the property walk uses
+    // propertyOffset(): only what this concrete class declared.
+    QList<PropertyGroup> GroupsFor(const QMetaObject* mo)
+    {
+        static const QLatin1String prefix("propertyGroup/");
+
+        QList<PropertyGroup> groups;
+
+        for (int i = mo->classInfoOffset(); i < mo->classInfoCount(); ++i)
+        {
+            const QMetaClassInfo info = mo->classInfo(i);
+            const QString key = QString::fromLatin1(info.name());
+
+            if (!key.startsWith(prefix))
+                continue;
+
+            PropertyGroup group;
+            group.label = key.mid(prefix.size());
+
+            const QStringList entries = QString::fromLatin1(info.value()).split(QLatin1Char(','), Qt::SkipEmptyParts);
+
+            for (const QString& entry : entries)
+            {
+                const int eq = entry.indexOf(QLatin1Char('='));
+                const QString prop = (eq < 0 ? entry : entry.left(eq)).trimmed();
+                const QString leaf = (eq < 0 ? entry : entry.mid(eq + 1)).trimmed();
+
+                if (!prop.isEmpty() && !leaf.isEmpty())
+                    group.leaves.append({ prop.toLatin1(), leaf });
+            }
+
+            if (!group.leaves.isEmpty())
+                groups.append(group);
+        }
+
+        return groups;
+    }
+
+    // What to show beside a collapsed group so its contents are not a mystery:
+    // the first leaf that holds a non-empty string. A path is the whole reason
+    // most of these groups exist, and having to expand one just to see whether
+    // it is set would trade a row for a click.
+    QString GroupSummary(QObject* object, const PropertyGroup& group)
+    {
+        for (const auto& leaf : group.leaves)
+        {
+            const QVariant v = object->property(leaf.first.constData());
+
+            if (v.metaType().id() != QMetaType::QString)
+                continue;
+
+            QString text = v.toString().trimmed();
+
+            if (text.isEmpty())
+                continue;
+
+            const int slash = text.lastIndexOf(QLatin1Char('/'));
+
+            if (slash >= 0)
+                text = text.mid(slash + 1);
+
+            return text.size() > 28 ? text.left(27) + QChar(0x2026) : text;
+        }
+
+        return QString();
+    }
+}
+
 static bool PropertyIsUniform(const QList<UiElement*>& targets, const QString& kind, const char* propName)
 {
     bool haveFirst = false;
@@ -76,22 +166,62 @@ static bool PropertyIsUniform(const QList<UiElement*>& targets, const QString& k
 
 PropertyEditorPanel::PropertyEditorPanel(QWidget* parent) : QWidget(parent), target(nullptr)
 {
-    scrollArea = new QScrollArea(this);
-    scrollArea->setWidgetResizable(true);
-    container = new QWidget(scrollArea);
-    layout = new QVBoxLayout();
-    layout->setAlignment(Qt::AlignTop);
-    container->setLayout(layout);
-    scrollArea->setWidget(container);
+    banner = new QLabel(this);
+    banner->setWordWrap(true);
+    banner->hide();
 
-    scrollArea->setFrameShape(QFrame::NoFrame);
-    container->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    layout->setContentsMargins(6, 6, 6, 6);
+    tree = new QTreeWidget(this);
+    tree->setColumnCount(2);
+    tree->setHeaderLabels({ QStringLiteral("Property"), QStringLiteral("Value") });
+
+    // An inspector is not a list you pick from: rows highlighting blue as the
+    // cursor crosses them is noise, and the editors are the interactive part.
+    tree->setSelectionMode(QAbstractItemView::NoSelection);
+    tree->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    // Editors differ in height (a colour swatch is not a two-spinbox row), so
+    // rows cannot be assumed uniform - each item carries its editor's size
+    // hint instead.
+    tree->setUniformRowHeights(false);
+    tree->setAlternatingRowColors(true);
+    tree->setFrameShape(QFrame::NoFrame);
+
+    tree->header()->setSectionResizeMode(0, QHeaderView::Interactive);
+    tree->header()->setStretchLastSection(true);
+
+    connect(tree->header(), &QHeaderView::sectionResized, this, [this](int index, int, int)
+    {
+        if (index == 0 && !adjustingColumns)
+            autoColumnWidth = false;
+    });
+
+    // Remember what the user opened and closed, so the next rebuild - there is
+    // one per queued ComponentChanged - puts it back the way they left it.
+    connect(tree, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem* item)
+    {
+        const QString key = item->data(0, Qt::UserRole).toString();
+
+        if (!key.isEmpty())
+            nodeExpansion.insert(key, true);
+
+        // Opening a node reveals rows one level deeper, which are wider.
+        FitNameColumn();
+    });
+
+    connect(tree, &QTreeWidget::itemCollapsed, this, [this](QTreeWidgetItem* item)
+    {
+        const QString key = item->data(0, Qt::UserRole).toString();
+
+        if (!key.isEmpty())
+            nodeExpansion.insert(key, false);
+    });
 
     auto* outer = new QVBoxLayout();
 
     outer->setContentsMargins(4, 4, 4, 4);
-    outer->addWidget(scrollArea);
+    outer->setSpacing(4);
+    outer->addWidget(banner);
+    outer->addWidget(tree, 1);
 
     setLayout(outer);
 
@@ -1060,66 +1190,234 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
     return label;
 }
 
+void PropertyEditorPanel::FitNameColumn()
+{
+    if (!autoColumnWidth)
+        return;
+
+    adjustingColumns = true;
+
+    tree->resizeColumnToContents(0);
+
+    // Fitting alone would let a long name starve the editors in a narrow
+    // panel, so the name column never takes more than half of it.
+    const int viewport = tree->viewport()->width();
+    const int cap = viewport > 0 ? qMax(120, viewport / 2) : 180;
+
+    if (tree->columnWidth(0) > cap)
+        tree->setColumnWidth(0, cap);
+
+    adjustingColumns = false;
+}
+
+QTreeWidgetItem* PropertyEditorPanel::AddNode(QTreeWidgetItem* parent, const QString& label,
+                                              const QString& stateKey, bool expandedByDefault)
+{
+    auto* node = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(tree);
+
+    node->setText(0, label);
+    node->setData(0, Qt::UserRole, stateKey);
+    node->setFirstColumnSpanned(true);
+
+    QFont bold = node->font(0);
+    bold.setBold(true);
+    node->setFont(0, bold);
+
+    node->setExpanded(nodeExpansion.value(stateKey, expandedByDefault));
+
+    return node;
+}
+
+void PropertyEditorPanel::AddPropertyRow(QTreeWidgetItem* parent, QObject* object,
+                                         const QMetaProperty& prop, const QString& label, bool mixed)
+{
+    auto* row = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(tree);
+
+    row->setText(0, label);
+
+    QWidget* editor = EditorForProperty(object, prop, mixed);
+
+    if (!editor)
+        return;
+
+    if (mixed)
+        editor->setToolTip(QStringLiteral("Values differ across the selection. Editing sets all to the same value."));
+
+    // Without this the row keeps the default text height and clips anything
+    // taller - a colour swatch, a path field with its browse button.
+    row->setSizeHint(1, editor->sizeHint());
+
+    tree->setItemWidget(row, 1, editor);
+}
+
+void PropertyEditorPanel::BuildComponentRows(Component* component, QTreeWidgetItem* node, bool multiSelect)
+{
+    const QMetaObject* mo = component->metaObject();
+    const QString kind = component->GetTypeName();
+
+    const QList<PropertyGroup> groups = GroupsFor(mo);
+
+    QHash<QByteArray, int> groupOf;
+
+    for (int gi = 0; gi < groups.size(); ++gi)
+        for (const auto& leaf : groups.at(gi).leaves)
+            groupOf.insert(leaf.first, gi);
+
+    auto isMixed = [&](const QMetaProperty& prop)
+    {
+        return multiSelect && !PropertyIsUniform(targets, kind, prop.name());
+    };
+
+    QSet<int> placed;
+
+    for (int i = mo->propertyOffset(); i < mo->propertyCount(); ++i)
+    {
+        const QMetaProperty prop = mo->property(i);
+
+        if (!prop.isWritable() || !prop.isReadable())
+            continue;
+
+        const int gi = groupOf.value(prop.name(), -1);
+
+        if (gi < 0)
+        {
+            AddPropertyRow(node, component, prop, QString::fromLatin1(prop.name()), isMixed(prop));
+            continue;
+        }
+
+        // A group takes the place of the FIRST of its members, so grouping
+        // never reshuffles a component's property order; the remaining members
+        // are drawn inside it rather than again alongside it.
+        if (placed.contains(gi))
+            continue;
+
+        placed.insert(gi);
+
+        const PropertyGroup& group = groups.at(gi);
+        const QString summary = GroupSummary(component, group);
+
+        QTreeWidgetItem* groupNode = AddNode(node, group.label, kind + QLatin1Char('/') + group.label, false);
+
+        // What the group holds, without having to open it. A path is the whole
+        // reason most of these exist.
+        if (!summary.isEmpty())
+        {
+            groupNode->setFirstColumnSpanned(false);
+            groupNode->setText(1, summary);
+            groupNode->setForeground(1, QBrush(QColor(0x88, 0x88, 0x92)));
+            groupNode->setToolTip(1, summary);
+        }
+
+        for (const auto& leaf : group.leaves)
+        {
+            const int li = mo->indexOfProperty(leaf.first.constData());
+
+            if (li < mo->propertyOffset())
+                continue;
+
+            const QMetaProperty leafProp = mo->property(li);
+
+            if (!leafProp.isWritable() || !leafProp.isReadable())
+                continue;
+
+            AddPropertyRow(groupNode, component, leafProp, leaf.second, isMixed(leafProp));
+        }
+    }
+}
+
 void PropertyEditorPanel::Rebuild()
 {
     pendingRebuild = false;
     rebuildQueued  = false;
 
-    // Every rebuild re-creates the whole widget tree, which resets the scroll bar
-    // to the top - so toggling a checkbox near the bottom of a Button's property
-    // list used to throw you back to the top. Restore deferred, because the new
-    // layout has no geometry until the event loop has run.
-    const int scrollY = scrollArea && scrollArea->verticalScrollBar()
-                      ? scrollArea->verticalScrollBar()->value()
-                      : 0;
+    // Every rebuild re-creates the whole tree, which resets the scroll bar to
+    // the top - so toggling a checkbox near the bottom of a Button's property
+    // list used to throw you back up. Restore deferred, because the new items
+    // have no geometry until the event loop has run.
+    const int scrollY = tree->verticalScrollBar() ? tree->verticalScrollBar()->value() : 0;
 
-    if (scrollY > 0)
+    // Deferred: the new items have no geometry until the event loop has run,
+    // so neither the scroll position nor the column fit can be computed yet.
+    QTimer::singleShot(0, this, [this, scrollY]()
     {
-        QTimer::singleShot(0, this, [this, scrollY]()
-        {
-            if (scrollArea && scrollArea->verticalScrollBar())
-                scrollArea->verticalScrollBar()->setValue(scrollY);
-        });
-    }
+        FitNameColumn();
 
-    QLayoutItem* child;
+        if (scrollY > 0 && tree->verticalScrollBar())
+            tree->verticalScrollBar()->setValue(scrollY);
+    });
 
-    while ((child = layout->takeAt(0)) != nullptr)
-    {
-        if (auto* w = child->widget())
-            w->deleteLater();
-
-        delete child;
-    }
+    // clear() deletes the items and with them the editor widgets. The lambdas
+    // that outlive a rebuild - the ones that open a modal dialog and come back
+    // - already hold their widgets through QPointer, so this is safe.
+    tree->clear();
+    banner->hide();
 
     if (!target)
         return;
 
     const bool isMulti = targets.size() > 1;
 
+    // --- the element's own name -------------------------------------------
+    auto* nameRow = new QTreeWidgetItem(tree);
+    nameRow->setText(0, QStringLiteral("Name"));
+
+    auto* nameEdit = new QLineEdit();
+
     if (isMulti)
     {
-        auto* header = new QLabel(QStringLiteral("%1 elements selected — edits apply to all").arg(targets.size()));
-        header->setWordWrap(true);
-        header->setStyleSheet("QLabel { color: #6cb6ff; padding: 4px 2px; font-weight: bold; }");
-        layout->addWidget(header);
-
-        auto* nameRow = new QWidget();
-        auto* nameLayout = new QHBoxLayout();
-        nameLayout->setContentsMargins(0,0,0,0);
-
-        auto* nameEdit = new QLineEdit(QStringLiteral("<multiple>"));
+        nameEdit->setText(QStringLiteral("<multiple>"));
         nameEdit->setReadOnly(true);
         nameEdit->setStyleSheet("QLineEdit { color: #aaaaaa; font-style: italic; }");
+    }
+    else if (target->IsSlot())
+    {
+        nameEdit->setText(target->GetName());
+        nameEdit->setReadOnly(true);
+        nameEdit->setStyleSheet("QLineEdit { color: #aaaaaa; }");
+    }
+    else
+    {
+        nameEdit->setText(target->GetName());
 
-        nameLayout->addWidget(new QLabel("Name"));
-        nameLayout->addWidget(nameEdit);
-        nameRow->setLayout(nameLayout);
-        layout->addWidget(nameRow);
+        QObject::connect(nameEdit, &QLineEdit::editingFinished, target, [this, nameEdit]()
+        {
+            if (!target)
+                return;
 
-        // Only show component kinds present on EVERY selected element, so an edit
-        // broadcast through ApplyPropertyChange lands on all of them.
-        QStringList commonKinds;
+            const QString v = nameEdit->text();
+
+            if (v.isEmpty())
+            {
+                nameEdit->setText(target->GetName());
+                return;
+            }
+
+            // Route through ApplyPropertyChange rather than calling SetName
+            // directly, so the rename produces a PropertyEditRecord with an
+            // empty componentKind - the element-level case
+            // PropertyEditCommand::Apply already handles - and lands on the
+            // undo stack like every other edit.
+            ApplyPropertyChange(target, "name", v);
+        });
+
+        QObject::connect(target, &UiElement::NameChanged, nameEdit, [nameEdit](const QString& v)
+        {
+            if (nameEdit->text() != v)
+                nameEdit->setText(v);
+        });
+    }
+
+    nameRow->setSizeHint(1, nameEdit->sizeHint());
+    tree->setItemWidget(nameRow, 1, nameEdit);
+
+    if (isMulti)
+    {
+        banner->setText(QStringLiteral("%1 elements selected — edits apply to all").arg(targets.size()));
+        banner->setStyleSheet("QLabel { color: #6cb6ff; padding: 4px 2px; font-weight: bold; }");
+        banner->show();
+
+        // Only show component kinds present on EVERY selected element, so an
+        // edit broadcast through ApplyPropertyChange lands on all of them.
         for (Component* comp : target->GetComponents())
         {
             const QString kind = comp->GetTypeName();
@@ -1134,41 +1432,12 @@ void PropertyEditorPanel::Rebuild()
                 }
             }
 
-            if (inAll)
-                commonKinds.append(kind);
-        }
-
-        for (Component* comp : target->GetComponents())
-        {
-            const QString kind = comp->GetTypeName();
-            if (!commonKinds.contains(kind))
+            if (!inAll)
                 continue;
 
-            auto* group = new QGroupBox(kind);
-            auto* form = new QFormLayout();
+            QTreeWidgetItem* node = AddNode(nullptr, kind, kind, true);
 
-            const QMetaObject* mo = comp->metaObject();
-
-            for (int i = mo->propertyOffset(); i < mo->propertyCount(); ++i)
-            {
-                QMetaProperty prop = mo->property(i);
-
-                if (!prop.isWritable() || !prop.isReadable())
-                    continue;
-
-                const bool mixed = !PropertyIsUniform(targets, kind, prop.name());
-
-                QWidget* editor = EditorForProperty(comp, prop, mixed);
-
-                QString label = QString::fromLatin1(prop.name());
-                if (mixed && editor)
-                    editor->setToolTip(QStringLiteral("Values differ across the selection. Editing sets all to the same value."));
-
-                form->addRow(label, editor);
-            }
-
-            group->setLayout(form);
-            layout->addWidget(group);
+            BuildComponentRows(comp, node, true);
 
             for (UiElement* el : targets)
             {
@@ -1177,98 +1446,27 @@ void PropertyEditorPanel::Rebuild()
             }
         }
 
-        layout->addStretch(1);
         return;
     }
 
     if (target->IsSlot())
     {
-        auto* nameRow = new QWidget();
-        auto* nameLayout = new QHBoxLayout();
-        nameLayout->setContentsMargins(0,0,0,0);
-
-        auto* nameEdit = new QLineEdit(target->GetName());
-        nameEdit->setReadOnly(true);
-        nameEdit->setStyleSheet("QLineEdit { color: #aaaaaa; }");
-
-        nameLayout->addWidget(new QLabel("Name"));
-        nameLayout->addWidget(nameEdit);
-        nameRow->setLayout(nameLayout);
-        layout->addWidget(nameRow);
-
-        auto* notice = new QLabel(QStringLiteral("Locked slot (index %1). Parent other elements to it to populate its contents.").arg(target->GetSlotIndex()));
-        notice->setWordWrap(true);
-        notice->setStyleSheet("QLabel { color: #aaaaaa; padding: 12px 4px; }");
-        layout->addWidget(notice);
-        layout->addStretch(1);
+        banner->setText(QStringLiteral("Locked slot (index %1). Parent other elements to it to populate its contents.").arg(target->GetSlotIndex()));
+        banner->setStyleSheet("QLabel { color: #aaaaaa; padding: 8px 4px; }");
+        banner->show();
 
         return;
     }
 
-    auto* nameRow = new QWidget();
-
-    auto* nameLayout = new QHBoxLayout();
-
-    nameLayout->setContentsMargins(0,0,0,0);
-
-    auto* nameEdit = new QLineEdit(target->GetName());
-
-    QObject::connect(nameEdit, &QLineEdit::editingFinished, target, [this, nameEdit]()
+    for (Component* comp : target->GetComponents())
     {
-        if (!target)
-            return;
+        const QString kind = comp->GetTypeName();
 
-        const QString v = nameEdit->text();
+        QTreeWidgetItem* node = AddNode(nullptr, kind, kind, true);
 
-        if (v.isEmpty())
-        {
-            nameEdit->setText(target->GetName());
-            return;
-        }
-
-        // Route through ApplyPropertyChange rather than calling SetName
-        // directly, so the rename produces a PropertyEditRecord with an empty
-        // componentKind - the element-level case PropertyEditCommand::Apply
-        // already handles - and lands on the undo stack like every other edit.
-        ApplyPropertyChange(target, "name", v);
-    });
-
-    QObject::connect(target, &UiElement::NameChanged, nameEdit, [nameEdit](const QString& v)
-    {
-        if (nameEdit->text() != v)
-            nameEdit->setText(v);
-    });
-
-    nameLayout->addWidget(new QLabel("Name"));
-    nameLayout->addWidget(nameEdit);
-    nameRow->setLayout(nameLayout);
-    layout->addWidget(nameRow);
-
-    for (auto* comp : target->GetComponents())
-    {
-        auto* group = new QGroupBox(comp->GetTypeName());
-
-        auto* form = new QFormLayout();
-
-        const QMetaObject* mo = comp->metaObject();
-
-        for (int i = mo->propertyOffset(); i < mo->propertyCount(); ++i)
-        {
-            QMetaProperty prop = mo->property(i);
-
-            if (!prop.isWritable() || !prop.isReadable())
-                continue;
-
-            QWidget* editor = EditorForProperty(comp, prop);
-
-            form->addRow(QString::fromLatin1(prop.name()), editor);
-        }
-
-        group->setLayout(form);
-        layout->addWidget(group);
+        BuildComponentRows(comp, node, false);
 
         QObject::connect(comp, &Component::ComponentChanged, this, &PropertyEditorPanel::OnComponentChanged, Qt::UniqueConnection);
     }
-
-    layout->addStretch(1);
 }
+

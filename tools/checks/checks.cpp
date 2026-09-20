@@ -263,6 +263,9 @@ int main(int argc, char** argv)
     CheckPixelRaster();
     CheckDocumentBake();
     CheckUiBinConformance();
+    CheckTextOffset();
+    CheckPropertyGroups();
+    CheckTreeModelReset();
     CheckRegressions();
 
     std::fprintf(stderr, "\n%s (%d failure%s)\n",

@@ -1,4 +1,6 @@
 #include "components/ListRepeaterComponent.hpp"
+
+#include "core/TextOffset.hpp"
 #include "core/PixelModel.hpp"
 
 #include <algorithm>
@@ -84,7 +86,7 @@ bool ListRepeaterComponent::Paint(QPainter* painter, const QRectF& rect, bool se
             label = QString("Item %1").arg(i + 1);
 
         painter->setPen(QColor(160, 160, 170));
-        painter->drawText(itemRect, Qt::AlignCenter, label);
+        painter->drawText(TextOffset::Apply(itemRect, m_textOffset), Qt::AlignCenter, label);
     }
 
     if (selected)
@@ -127,6 +129,21 @@ void ListRepeaterComponent::SetAlternateColor(const QColor& v) { if (m_alternate
 QColor ListRepeaterComponent::GetBorderColor() const noexcept { return m_borderColor; }
 void ListRepeaterComponent::SetBorderColor(const QColor& v) { if (m_borderColor == v) return; m_borderColor = v; NotifyChanged(); }
 
+QPointF ListRepeaterComponent::GetTextOffset() const noexcept
+{
+    return m_textOffset;
+}
+
+void ListRepeaterComponent::SetTextOffset(const QPointF& v)
+{
+    if (m_textOffset == v)
+        return;
+
+    m_textOffset = v;
+
+    NotifyChanged();
+}
+
 void ListRepeaterComponent::ToJson(QJsonObject& out) const
 {
     out["kind"] = "ListRepeater";
@@ -138,6 +155,8 @@ void ListRepeaterComponent::ToJson(QJsonObject& out) const
     out["itemColor"] = m_itemColor.name(QColor::HexArgb);
     out["alternateColor"] = m_alternateColor.name(QColor::HexArgb);
     out["borderColor"] = m_borderColor.name(QColor::HexArgb);
+    out["textOffsetX"] = m_textOffset.x();
+    out["textOffsetY"] = m_textOffset.y();
 }
 
 void ListRepeaterComponent::FromJson(const QJsonObject& in)
@@ -150,4 +169,5 @@ void ListRepeaterComponent::FromJson(const QJsonObject& in)
     SetItemColor(QColor(in["itemColor"].toString("#FF2D2D34")));
     SetAlternateColor(QColor(in["alternateColor"].toString("#FF32323A")));
     SetBorderColor(QColor(in["borderColor"].toString("#FF464650")));
+    SetTextOffset(QPointF(in["textOffsetX"].toDouble(0.0), in["textOffsetY"].toDouble(0.0)));
 }

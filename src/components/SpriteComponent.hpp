@@ -11,6 +11,10 @@ class SpriteComponent : public Component
 {
     Q_OBJECT
 
+    Q_CLASSINFO("propertyGroup/primaryImage", "imagePath=path,assetDomain=domain,assetRegistryValue=registryValue")
+    Q_CLASSINFO("propertyGroup/slice", "sliceLeft=left,sliceTop=top,sliceRight=right,sliceBottom=bottom")
+    Q_CLASSINFO("propertyGroup/textureWrap", "textureFill=fill,cropAnchor=anchor,cropOffsetX=offsetX,cropOffsetY=offsetY")
+
     Q_PROPERTY(QString imagePath READ GetImagePath WRITE SetImagePath NOTIFY ComponentChanged)
     Q_PROPERTY(int frameWidth READ GetFrameWidth WRITE SetFrameWidth NOTIFY ComponentChanged)
     Q_PROPERTY(int frameHeight READ GetFrameHeight WRITE SetFrameHeight NOTIFY ComponentChanged)

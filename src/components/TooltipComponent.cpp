@@ -1,4 +1,6 @@
 #include "components/TooltipComponent.hpp"
+
+#include "core/TextOffset.hpp"
 #include "core/PixelDraw.hpp"
 #include "core/PixelModel.hpp"
 
@@ -67,7 +69,7 @@ bool TooltipComponent::Paint(QPainter* painter, const QRectF& rect, bool selecte
     font.setPixelSize(m_pixelSize);
     painter->setFont(font);
     painter->setPen(m_textColor);
-    painter->drawText(bodyRect, Qt::AlignCenter, m_tooltipText);
+    painter->drawText(TextOffset::Apply(bodyRect, m_textOffset), Qt::AlignCenter, m_tooltipText);
 
     if (selected)
     {
@@ -100,6 +102,21 @@ void TooltipComponent::SetFontFamily(const QString& v) { if (m_fontFamily == v) 
 int TooltipComponent::GetPixelSize() const noexcept { return m_pixelSize; }
 void TooltipComponent::SetPixelSize(int v) { if (m_pixelSize == v) return; m_pixelSize = v; NotifyChanged(); }
 
+QPointF TooltipComponent::GetTextOffset() const noexcept
+{
+    return m_textOffset;
+}
+
+void TooltipComponent::SetTextOffset(const QPointF& v)
+{
+    if (m_textOffset == v)
+        return;
+
+    m_textOffset = v;
+
+    NotifyChanged();
+}
+
 void TooltipComponent::ToJson(QJsonObject& out) const
 {
     out["kind"] = "Tooltip";
@@ -109,6 +126,8 @@ void TooltipComponent::ToJson(QJsonObject& out) const
     out["borderColor"] = m_borderColor.name(QColor::HexArgb);
     out["fontFamily"] = m_fontFamily;
     out["pixelSize"] = m_pixelSize;
+    out["textOffsetX"] = m_textOffset.x();
+    out["textOffsetY"] = m_textOffset.y();
 }
 
 void TooltipComponent::FromJson(const QJsonObject& in)
@@ -119,4 +138,5 @@ void TooltipComponent::FromJson(const QJsonObject& in)
     SetBorderColor(QColor(in["borderColor"].toString("#FF50505A")));
     SetFontFamily(in["fontFamily"].toString("Inter"));
     SetPixelSize(in["pixelSize"].toInt(13));
+    SetTextOffset(QPointF(in["textOffsetX"].toDouble(0.0), in["textOffsetY"].toDouble(0.0)));
 }

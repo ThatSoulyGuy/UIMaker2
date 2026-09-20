@@ -3,6 +3,7 @@
 
 #include <QString>
 #include <QColor>
+#include <QPointF>
 
 #include "core/Component.hpp"
 #include "core/Anchor.hpp"
@@ -10,6 +11,11 @@
 class TextComponent : public Component
 {
     Q_OBJECT
+
+    // Inspector grouping only; see GroupsFor in ui/PropertyEditorPanel.cpp.
+    // Property names are the .uibin field names and are deliberately untouched.
+    Q_CLASSINFO("propertyGroup/font", "fontPath=path,assetDomain=domain,assetRegistryValue=registryValue")
+
     Q_PROPERTY(QString text READ GetText WRITE SetText NOTIFY ComponentChanged)
     Q_PROPERTY(QString fontFamily READ GetFontFamily WRITE SetFontFamily NOTIFY ComponentChanged)
     Q_PROPERTY(int pixelSize READ GetPixelSize WRITE SetPixelSize NOTIFY ComponentChanged)
@@ -19,6 +25,7 @@ class TextComponent : public Component
     Q_PROPERTY(QString assetRegistryValue READ GetAssetRegistryValue WRITE SetAssetRegistryValue NOTIFY ComponentChanged)
     Q_PROPERTY(AnchorFlags alignment READ GetAlignment WRITE SetAlignment NOTIFY ComponentChanged)
     Q_PROPERTY(bool hasBackground READ GetHasBackground WRITE SetHasBackground NOTIFY ComponentChanged)
+    Q_PROPERTY(QPointF textOffset READ GetTextOffset WRITE SetTextOffset NOTIFY ComponentChanged)
 
 public:
 
@@ -66,6 +73,10 @@ public:
 
     void SetAssetRegistryValue(const QString& v);
 
+    // Nudge applied to the glyph box only; see core/TextOffset.hpp.
+    QPointF GetTextOffset() const noexcept;
+    void SetTextOffset(const QPointF& v);
+
     void ToJson(QJsonObject& out) const override;
 
     void FromJson(const QJsonObject& in) override;
@@ -83,6 +94,7 @@ private:
     AnchorFlags alignment;
     bool hasBackground;
 
+    QPointF m_textOffset;
 };
 
 #endif
