@@ -24,6 +24,43 @@ public:
     explicit SceneDocument(QObject* parent = nullptr);
     ~SceneDocument() override;
 
+    // Coalesces structure bookkeeping across a burst of changes.
+    //
+    // Every AddChild/ReparentTo/delete emits StructureChanged, and each one
+    // costs two full walks of the items map plus a whole-tree UpdateZValues
+    // recursion. Loading builds children top-down, so element k paid a pass
+    // over the k items created so far - quadratic. Pasting a 20-node subtree
+    // ran the same three passes (plus a tree-model reset and an expandAll)
+    // twenty times over, which is the visible paste stall.
+    //
+    // Scope one of these around a burst and the work happens once, at the end.
+    // Nestable: only the outermost scope flushes.
+    struct StructureBatch
+    {
+        explicit StructureBatch(SceneDocument* d) : doc(d)
+        {
+            if (doc)
+                ++doc->m_structureSuspend;
+        }
+
+        ~StructureBatch()
+        {
+            if (!doc)
+                return;
+
+            if (--doc->m_structureSuspend == 0 && doc->m_structureDirty)
+            {
+                doc->m_structureDirty = false;
+                doc->OnStructureChanged();
+            }
+        }
+
+        StructureBatch(const StructureBatch&) = delete;
+        StructureBatch& operator=(const StructureBatch&) = delete;
+
+        SceneDocument* doc;
+    };
+
     UiElement* GetRoot() const noexcept;
 
     QGraphicsScene* GetScene() const noexcept;
@@ -115,6 +152,12 @@ private:
     QMap<UiElement*, SceneElementItem*> items;
     QString m_baseDir;
     bool m_syncingSelection = false;
+
+    // Depth counter, not a bool, so nested bursts (CreateElementFromJson
+    // recursing, EnsureSlots inside a load) are covered by the outermost scope
+    // rather than the innermost one closing early.
+    int  m_structureSuspend = 0;
+    bool m_structureDirty   = false;
     QMetaObject::Connection m_sceneRectConn;
     QMetaObject::Connection m_rootStructureConn;
 };

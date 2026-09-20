@@ -15,6 +15,7 @@
 #include "core/GridSnap.hpp"
 #include <QGraphicsView>
 #include <QSignalSpy>
+#include <QElapsedTimer>
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
@@ -30,6 +31,7 @@
 #include "core/GridSnap.hpp"
 #include <QGraphicsView>
 #include <QSignalSpy>
+#include <QElapsedTimer>
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
@@ -308,6 +310,93 @@ int main(int argc, char** argv)
         model.setData(idx, QStringLiteral("FromTree"), Qt::EditRole);
         check(asked.count() == 1, "setData emits RenameRequested instead of renaming directly");
         check(panel->GetName() == "Panel", "so the model itself no longer mutates the document");
+    }
+
+    std::fprintf(stderr, "structure batching preserves geometry and linearises load (stage 7)\n");
+    {
+        // Build a tree through the UNBATCHED authoring path (CreateXElement),
+        // then round-trip it through the BATCHED load path and require the
+        // laid-out geometry to come back bit-identical.
+        auto checksum = [](SceneDocument& d)
+        {
+            double sum = 0.0;
+            std::function<void(UiElement*)> walk = [&](UiElement* e)
+            {
+                for (QObject* c : e->children())
+                {
+                    if (auto* ce = qobject_cast<UiElement*>(c))
+                    {
+                        if (SceneElementItem* it = d.GetItem(ce))
+                        {
+                            sum += it->scenePos().x() + it->scenePos().y()
+                                 + it->boundingRect().width() + it->boundingRect().height();
+                        }
+                        walk(ce);
+                    }
+                }
+            };
+            walk(d.GetRoot());
+            return sum;
+        };
+
+        auto build = [](SceneDocument& d, int panels, int perPanel)
+        {
+            for (int i = 0; i < panels; ++i)
+            {
+                UiElement* p = d.CreatePanelElement(QStringLiteral("P%1").arg(i), nullptr);
+                p->GetComponent<TransformComponent>()->SetPosition(QPointF(i * 13.0, i * 7.0));
+
+                for (int j = 0; j < perPanel; ++j)
+                {
+                    UiElement* t = d.CreateTextElement(QStringLiteral("T%1_%2").arg(i).arg(j), p);
+                    t->GetComponent<TransformComponent>()->SetPosition(QPointF(j * 11.0, j * 5.0));
+                }
+            }
+        };
+
+        auto settle = []{ for (int i = 0; i < 8; ++i) qApp->processEvents(); };
+
+        SceneDocument authored;
+        build(authored, 12, 9);
+        settle();
+        const double authoredSum = checksum(authored);
+
+        const QByteArray json = authored.ExportJson();
+
+        SceneDocument loaded;
+        check(loaded.LoadJson(json), "the authored scene reloads");
+        settle();
+        const double loadedSum = checksum(loaded);
+
+        check(authoredSum == loadedSum, "batched load produces bit-identical geometry");
+        if (authoredSum != loadedSum)
+            std::fprintf(stderr, "      authored %.6f vs loaded %.6f\n", authoredSum, loadedSum);
+
+        // Scaling: the per-element cost must stay flat, not grow with N.
+        double perElement[3] = {0, 0, 0};
+        const int sizes[3] = {10, 40, 90};
+
+        for (int k = 0; k < 3; ++k)
+        {
+            SceneDocument src;
+            build(src, sizes[k], 9);
+            settle();
+            const QByteArray blob = src.ExportJson();
+            const int count = sizes[k] * 10;
+
+            SceneDocument dst;
+            QElapsedTimer t; t.start();
+            dst.LoadJson(blob);
+            perElement[k] = double(t.nsecsElapsed()) / 1e6 / count;
+
+            std::fprintf(stderr, "      %4d elements: %7.4f ms total, %.5f ms/element\n",
+                         count, perElement[k] * count, perElement[k]);
+        }
+
+        // Quadratic would make the largest case's per-element cost balloon.
+        // Allow generous slack for noise; the pre-batch code was ~9x here.
+        check(perElement[2] < perElement[0] * 3.0,
+              "per-element load cost stays flat as the scene grows (linear, not quadratic)");
     }
 
     std::fprintf(stderr, "%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASS",

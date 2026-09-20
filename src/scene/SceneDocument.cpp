@@ -463,6 +463,14 @@ UiElement* SceneDocument::CreateListRepeaterElement(const QString& name, UiEleme
 
 void SceneDocument::OnStructureChanged()
 {
+    // Inside a StructureBatch: remember that something moved and do the work
+    // once, when the outermost scope closes.
+    if (m_structureSuspend > 0)
+    {
+        m_structureDirty = true;
+        return;
+    }
+
     for (auto it = items.begin(); it != items.end(); ++it)
     {
         UiElement* element = it.key();
@@ -585,8 +593,14 @@ bool SceneDocument::LoadJson(const QByteArray& data)
             comp->FromJson(c);
     }
 
-    for (const QJsonValue& v : rootObj["children"].toArray())
-        CreateElementFromJson(v.toObject(), root, /*preserveIds=*/true);
+    {
+        // Without this the load is quadratic: each AddChild emits
+        // StructureChanged, and each emission walks every item created so far.
+        StructureBatch batch(this);
+
+        for (const QJsonValue& v : rootObj["children"].toArray())
+            CreateElementFromJson(v.toObject(), root, /*preserveIds=*/true);
+    }
 
     WireRootConnections();
     OnStructureChanged();
@@ -628,7 +642,10 @@ void SceneDocument::DeleteElement(UiElement* e)
 
     SetSelected(nullptr);
 
-    RemoveElementInternal(e);
+    {
+        StructureBatch batch(this);
+        RemoveElementInternal(e);
+    }
 
     // One emit is enough: both the parent's and the root's StructureChanged land
     // on this document's OnStructureChanged, and EntityTreeModel listens only on
@@ -716,6 +733,10 @@ void SceneDocument::OnSceneSelectionChanged()
 
 UiElement* SceneDocument::CreateElementFromJson(const QJsonObject& obj, UiElement* parent, bool preserveIds)
 {
+    // Nests: recursing into children keeps the outermost scope open, so a whole
+    // pasted or loaded subtree costs one structure pass rather than one per node.
+    StructureBatch batch(this);
+
     QString name = obj["name"].toString("Element");
     UiElement* e = parent->AddChild(name);
 
@@ -764,6 +785,11 @@ void SceneDocument::EnsureSlots(UiElement* master, const QString& masterKind, in
 {
     if (!master)
         return;
+
+    // Reconciling slots creates and destroys whole subtrees; one structure pass
+    // for the batch rather than one per slot. Editing a TabContainer's tabNames
+    // ran this on every keystroke before the inspector moved to editingFinished.
+    StructureBatch batch(this);
 
     // Existing slots by index. Growth is index-based so a missing middle index
     // is recreated even when the total count happens to match, and a surviving

@@ -188,6 +188,9 @@ public:
 
     void undo() override
     {
+        // One structure pass for the whole replay, not one per op.
+        SceneDocument::StructureBatch batch(doc);
+
         for (const StructuralOp& op : ops)
         {
             if (op.kind == StructuralOp::Add)
@@ -204,6 +207,8 @@ public:
             firstRedo = false;
             return;
         }
+
+        SceneDocument::StructureBatch batch(doc);
 
         for (const StructuralOp& op : ops)
         {
@@ -1714,6 +1719,10 @@ void MainWindow::DoPaste()
     QList<StructuralOp> ops;
     QList<UiElement*> pasted;
 
+    // One structure pass for the whole paste, rather than one per element -
+    // each of which used to also reset the tree model and re-expandAll.
+    SceneDocument::StructureBatch batch(document);
+
     for (const QJsonValue& v : arr)
     {
         if (!v.isObject())
@@ -1764,6 +1773,9 @@ void MainWindow::DoCut()
 
     DoCopy();
 
+    // One structure pass for the whole cut.
+    SceneDocument::StructureBatch batch(document);
+
     // Snapshot each subtree (json + parent + row) BEFORE deletion so undo can
     // recreate them at their original locations.
     QList<StructuralOp> ops;
@@ -1798,6 +1810,9 @@ void MainWindow::DoDuplicate()
 
     if (targets.isEmpty())
         return;
+
+    // One structure pass for the whole duplicate.
+    SceneDocument::StructureBatch batch(document);
 
     QList<StructuralOp> ops;
     for (UiElement* e : targets)
@@ -1837,6 +1852,9 @@ void MainWindow::DoDelete()
 
     if (targets.isEmpty())
         return;
+
+    // One structure pass for the whole delete.
+    SceneDocument::StructureBatch batch(document);
 
     // Snapshot subtrees first, then perform the deletions. The ops are sorted
     // into (parent, row) order before the command is built - selection order
