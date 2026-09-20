@@ -13,6 +13,7 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QSettings>
+#include <QSet>
 #include <QMenu>
 #include <QMenuBar>
 #include <QInputDialog>
@@ -28,6 +29,8 @@
 #include <QItemSelection>
 #include <QSignalBlocker>
 #include "components/ImageComponent.hpp"
+#include "components/PanelComponent.hpp"
+#include "components/TabContainerComponent.hpp"
 #include "core/GridSnap.hpp"
 #include "core/PixelModel.hpp"
 #include "core/UiElement.hpp"
@@ -815,19 +818,214 @@ void MainWindow::BuildToolbar()
     });
 }
 
+// Whether it makes sense for a new element to land INSIDE this one. Layout
+// components arrange children by definition; Panel and TabContainer are the
+// two non-layout elements whose whole purpose is to hold other things.
+// Everything else is leaf content - nesting a Button inside a Text is almost
+// never what the user meant, so those get a sibling instead.
+static bool AcceptsChildren(const UiElement* e)
+{
+    if (!e)
+        return false;
+
+    for (Component* c : e->GetComponents())
+    {
+        if (c->IsLayout())
+            return true;
+
+        if (qobject_cast<PanelComponent*>(c) || qobject_cast<TabContainerComponent*>(c))
+            return true;
+    }
+
+    return false;
+}
+
+UiElement* MainWindow::ContainerForNewElement() const
+{
+    UiElement* current = CurrentElement();
+
+    // A slot's children belong to its owning TabContainer/RadialMenu, which
+    // reconciles them in EnsureSlots - adding into one directly would be undone
+    // by the next reconciliation. Fall back to the slot's own parent.
+    if (current && current->IsSlot())
+        current = qobject_cast<UiElement*>(current->parent());
+
+    if (!current || current == document->GetRoot())
+        return document->GetRoot();
+
+    // A container takes the new element as a child; a leaf gets a sibling, so
+    // adding three Texts in a row puts all three next to each other rather than
+    // nesting each inside the last.
+    if (AcceptsChildren(current))
+        return current;
+
+    UiElement* parent = qobject_cast<UiElement*>(current->parent());
+
+    return parent ? parent : document->GetRoot();
+}
+
+QString MainWindow::UniqueChildName(UiElement* parent, const QString& base) const
+{
+    if (!parent)
+        return base;
+
+    QSet<QString> taken;
+
+    for (QObject* c : parent->children())
+    {
+        if (auto* e = qobject_cast<UiElement*>(c))
+            taken.insert(e->GetName());
+    }
+
+    if (!taken.contains(base))
+        return base;
+
+    // Strip an existing " <n>" suffix before counting, so duplicating "Text 3"
+    // yields "Text 4" rather than the "Text 3 2" a naive append would give.
+    QString stem = base;
+
+    const qsizetype sp = base.lastIndexOf(QLatin1Char(' '));
+
+    if (sp > 0)
+    {
+        bool numeric = false;
+        base.mid(sp + 1).toInt(&numeric);
+
+        if (numeric)
+            stem = base.left(sp);
+    }
+
+    for (int n = 2; ; ++n)
+    {
+        const QString candidate = QStringLiteral("%1 %2").arg(stem).arg(n);
+
+        if (!taken.contains(candidate))
+            return candidate;
+    }
+}
+
+void MainWindow::NudgeOffSiblings(UiElement* e) const
+{
+    if (!e)
+        return;
+
+    auto* parent = qobject_cast<UiElement*>(e->parent());
+    auto* xform  = e->GetComponent<TransformComponent>();
+
+    if (!parent || !xform)
+        return;
+
+    // Layout parents place their own children; a stored position there is
+    // meaningless, so leave it alone.
+    for (Component* c : parent->GetComponents())
+    {
+        if (c->IsLayout())
+            return;
+    }
+
+    const auto occupied = [&](const QPointF& p)
+    {
+        for (QObject* c : parent->children())
+        {
+            auto* sib = qobject_cast<UiElement*>(c);
+
+            if (!sib || sib == e)
+                continue;
+
+            if (auto* sx = sib->GetComponent<TransformComponent>())
+            {
+                const QPointF d = sx->GetPosition() - p;
+
+                if (std::abs(d.x()) < 1.0 && std::abs(d.y()) < 1.0)
+                    return true;
+            }
+        }
+
+        return false;
+    };
+
+    QPointF pos = xform->GetPosition();
+
+    // Only moves an element that would otherwise be exactly hidden behind a
+    // sibling, so an intentional stack built by hand is left undisturbed.
+    for (int guard = 0; guard < 32 && occupied(pos); ++guard)
+        pos += QPointF(24.0, 24.0);
+
+    if (pos != xform->GetPosition())
+        xform->SetPosition(pos);
+}
+
+QPointF MainWindow::ViewCentreInParent(UiElement* parent) const
+{
+    if (!m_viewport || !document)
+        return QPointF(0.0, 0.0);
+
+    // Centre of the visible viewport, in scene units.
+    const QPointF sceneCentre =
+        m_viewport->mapToScene(m_viewport->viewport()->rect().center());
+
+    // TransformComponent::position is relative to the parent's own rect, so
+    // convert out of scene space through the parent's graphics item.
+    if (parent && parent != document->GetRoot())
+    {
+        if (SceneElementItem* parentItem = document->GetItem(parent))
+            return parentItem->mapFromScene(sceneCentre);
+    }
+
+    return sceneCentre;
+}
+
 void MainWindow::FinishAddElement(UiElement* e, const QString& name)
 {
     if (!e)
         return;
 
+    UiElement* parent = qobject_cast<UiElement*>(e->parent());
+
+    // Drop the element where the user is looking rather than at scene (0,0),
+    // which is the canvas corner and off-screen whenever the view is panned.
+    // Skipped under a layout parent, which positions its own children - storing
+    // a position there would just be a value the file carries and nobody uses.
+    bool parentIsLayout = false;
+
+    if (parent)
+    {
+        for (Component* c : parent->GetComponents())
+        {
+            if (c->IsLayout())
+            {
+                parentIsLayout = true;
+                break;
+            }
+        }
+    }
+
+    if (!parentIsLayout)
+    {
+        if (auto* xform = e->GetComponent<TransformComponent>())
+        {
+            const QPointF centre = ViewCentreInParent(parent);
+            const QPointF size   = xform->GetScale();
+
+            // Centre the element on that point, not its top-left corner.
+            xform->SetPosition(QPointF(centre.x() - size.x() * 0.5,
+                                       centre.y() - size.y() * 0.5));
+
+            // Then cascade off any sibling already sitting exactly there, so
+            // adding three Texts in a row gives three visible elements rather
+            // than one apparent element with two hidden underneath it.
+            NudgeOffSiblings(e);
+        }
+    }
+
     // The element already exists in the document; record an Add op so undo can
     // delete it by id and redo can recreate it in place (same pattern as
-    // paste/duplicate - the command's first redo() is a no-op).
+    // paste/duplicate - the command's first redo() is a no-op). The position
+    // above is set first so it is captured in op.json and survives redo.
     StructuralOp op;
     op.kind     = StructuralOp::Add;
     op.id       = e->GetId();
-    auto* p     = qobject_cast<UiElement*>(e->parent());
-    op.parentId = p ? p->GetId() : QUuid();
+    op.parentId = parent ? parent->GetId() : QUuid();
     op.row      = RowInParent(e);
     e->ToJson(op.json);
 
@@ -1134,7 +1332,13 @@ void MainWindow::ConnectActions()
     {
         connect(action, &QAction::triggered, this, [this, name, createFn]()
         {
-            FinishAddElement((document->*createFn)(name, nullptr), name);
+            // Add into what is selected, named uniquely within it. Previously
+            // every one of these passed nullptr, so all 20 add actions ignored
+            // the selection and dumped everything at the document root, all
+            // sharing one literal name.
+            UiElement* parent = ContainerForNewElement();
+
+            FinishAddElement((document->*createFn)(UniqueChildName(parent, name), parent), name);
         });
     };
 
@@ -1476,11 +1680,10 @@ void MainWindow::DoPaste()
     if (err.error != QJsonParseError::NoError)
         return;
 
-    UiElement* current = CurrentElement();
-    UiElement* parent  = current ? qobject_cast<UiElement*>(current->parent()) : document->GetRoot();
-
-    if (!parent)
-        parent = document->GetRoot();
+    // Paste INTO the selected container, matching what Add does. Pasting as a
+    // sibling of the selection meant there was no way to paste something into
+    // a panel you had just selected.
+    UiElement* parent = ContainerForNewElement();
 
     QJsonArray arr;
     if (doc.isArray())
@@ -1498,6 +1701,8 @@ void MainWindow::DoPaste()
     // top-level element so undo can delete-by-id and redo can recreate at the
     // same (parent, row) with the same id.
     QList<StructuralOp> ops;
+    QList<UiElement*> pasted;
+
     for (const QJsonValue& v : arr)
     {
         if (!v.isObject())
@@ -1506,6 +1711,16 @@ void MainWindow::DoPaste()
         UiElement* created = document->CreateElementFromJson(v.toObject(), parent);
         if (!created)
             continue;
+
+        // Names come from the clipboard verbatim, so pasting into the same
+        // parent twice would otherwise produce two identically named siblings.
+        created->SetName(UniqueChildName(parent, created->GetName()));
+
+        // Pasted content keeps its authored position unless that would hide it
+        // exactly behind what it was copied from.
+        NudgeOffSiblings(created);
+
+        pasted.append(created);
 
         StructuralOp op;
         op.kind     = StructuralOp::Add;
@@ -1516,8 +1731,17 @@ void MainWindow::DoPaste()
         ops.append(op);
     }
 
-    if (!ops.isEmpty())
-        undoStack->push(new StructuralCommand(document, ops, "Paste"));
+    if (ops.isEmpty())
+        return;
+
+    undoStack->push(new StructuralCommand(document, ops, "Paste"));
+
+    // Select what was just pasted, so Ctrl+D / arrow-nudge / a drag act on it
+    // rather than on whatever happened to be selected before.
+    document->SetSelectedElements(pasted);
+
+    if (!pasted.isEmpty())
+        propertyPanel->SetTargets(pasted);
 }
 
 void MainWindow::DoCut()

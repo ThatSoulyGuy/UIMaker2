@@ -85,6 +85,27 @@ private:
     // current document (New, Load). Returns false when the caller must abort.
     bool ConfirmDiscardChanges();
 
+    // Where a newly added or pasted element should go: the selected element if
+    // it can hold children, otherwise the document root. Never returns a slot
+    // (slots are managed by their owning TabContainer/RadialMenu) and never
+    // returns null.
+    UiElement* ContainerForNewElement() const;
+
+    // "Panel", then "Panel 2", "Panel 3", ... among that parent's child
+    // elements. UiElement::AddChild takes the name verbatim, so without this
+    // three added panels are all literally named "Panel".
+    QString UniqueChildName(UiElement* parent, const QString& base) const;
+
+    // Centre of what the user is currently looking at, expressed in the given
+    // parent's local coordinates. New elements land there instead of at scene
+    // (0,0), which is off-screen whenever the canvas is panned.
+    QPointF ViewCentreInParent(UiElement* parent) const;
+
+    // Offset an element that would sit exactly on top of a sibling, so added
+    // and pasted elements are visibly distinct. Leaves an intentional hand-made
+    // stack alone, and does nothing under a layout parent.
+    void NudgeOffSiblings(UiElement* e) const;
+
     UiElement* CurrentElement() const;
     QList<UiElement*> SelectedElements() const;
 
