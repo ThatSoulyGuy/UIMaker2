@@ -358,8 +358,9 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
 
         if (name == "textureFill")
         {
-            combo->addItem("Stretch");            // PixelDraw::FillStretch
-            combo->addItem("Wrap (pixel-exact)"); // PixelDraw::FillWrap
+            combo->addItem("Auto (follows render model)");  // FillAuto
+            combo->addItem("Stretch");                      // FillStretch
+            combo->addItem("Wrap (pixel-exact)");           // FillWrap
         }
         else
         {

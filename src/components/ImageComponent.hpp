@@ -102,6 +102,11 @@ public:
     // Pull the slice from the sidecar next to `path`, if one exists.
     void AdoptSidecarSlice(const QString& path);
 
+    // If the owning element is still at the factory default size, resize it to
+    // show this texture 1:1. Only fires on the untouched default, so it never
+    // overrides a size the user chose.
+    void SizeOwnerToTexture();
+
 private:
 
     PixelDraw::Slice slice;

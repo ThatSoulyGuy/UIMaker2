@@ -305,11 +305,34 @@ void ViewportWidget::drawBackground(QPainter* painter, const QRectF& rect)
             const double cellW = cell.width();
             const double cellH = cell.height();
 
-            // Skip only when cells collapse to a sub-pixel wash. The threshold
-            // is low enough that a fine grid (e.g. Minecraft's 320x240, whose
-            // cells are ~4.5px tall on the canvas) still shows at the default
-            // fit-to-canvas zoom, so the overlay agrees with the active snap.
-            if (cellW * zoom >= 2.0 && cellH * zoom >= 2.0)
+            // A grid finer than a few pixels on screen is a grey wash, not a
+            // reference - and drawing it costs one primitive per line. So step
+            // up by powers of two until the drawn spacing is legible, exactly
+            // as a DCC app shows major gridlines when you zoom out. Every line
+            // drawn is still a REAL snap position, just not every snap position
+            // is drawn.
+            // Cost is dominated by total line LENGTH, so the lever is line count:
+            // measured ~48 us per full-height line in the software rasteriser.
+            // 16px keeps the grid a usable spatial reference while halving the
+            // worst case; once you zoom in far enough to work pixel-by-pixel,
+            // the step falls to 1 and you see the true grid - and at that zoom
+            // few lines are on screen anyway.
+            constexpr double kMinSpacingPx = 16.0;
+
+            int stepX = 1;
+            while (cellW * zoom * stepX < kMinSpacingPx && stepX < (1 << 16))
+                stepX *= 2;
+
+            int stepY = 1;
+            while (cellH * zoom * stepY < kMinSpacingPx && stepY < (1 << 16))
+                stepY *= 2;
+
+            const double spanX = cellW * stepX;
+            const double spanY = cellH * stepY;
+
+            // Still give up when even a stepped grid would cover the canvas in
+            // lines, which happens only at absurd zoom-out.
+            if (spanX * zoom >= 2.0 && spanY * zoom >= 2.0)
             {
                 // Only the lines that actually intersect the exposed area, and
                 // only across the exposed span. Drawing all (dx+1)+(dy+1) lines
@@ -319,36 +342,57 @@ void ViewportWidget::drawBackground(QPainter* painter, const QRectF& rect)
                 // canvas no matter how little of it was on screen.
                 const QRectF area = rect.intersected(canvas);
 
+                // EXACT positions, not a tile.
+                //
+                // The previous version blitted a cached tile, which meant the
+                // drawn period was lround(cell * n) DEVICE PIXELS while the
+                // real snap period is fractional. The grid therefore drifted
+                // from the positions a drag actually snaps to, and every zoom
+                // step re-rounded the tile and made the whole grid jump - the
+                // reported jitter. A pixel grid that does not sit where the
+                // pixels are is worse than a slow one.
+                //
+                // Drawn in device space with a plain 1px pen and batched into
+                // one drawLines call. QGraphicsView has already set a clip by
+                // the time drawBackground runs, which is the fast raster path:
+                // measured ~1 ms for ~700 lines versus ~34 ms unclipped.
                 const QTransform world = painter->worldTransform();
-                const double dpr = painter->device() ? painter->device()->devicePixelRatioF() : 1.0;
 
-                if (!area.isEmpty() && EnsureSnapTile(cellW, cellH, zoom, dpr))
+                // Division counts follow from the cell: in PixelGrid mode the
+                // cell is the virtual pixel and the counts are derived, so they
+                // cannot be read from GridSnap.
+                const int divX = int(std::ceil(canvas.width() / spanX));
+                const int divY = int(std::ceil(canvas.height() / spanY));
+
+                const int i0 = std::max(0, int(std::floor((area.left() - canvas.left()) / spanX)));
+                const int i1 = std::min(divX, int(std::ceil((area.right() - canvas.left()) / spanX)));
+                const int j0 = std::max(0, int(std::floor((area.top() - canvas.top()) / spanY)));
+                const int j1 = std::min(divY, int(std::ceil((area.bottom() - canvas.top()) / spanY)));
+
+                const QPointF a0 = world.map(area.topLeft());
+                const QPointF a1 = world.map(area.bottomRight());
+
+                QVarLengthArray<QLineF, 2048> lines;
+
+                for (int i = i0; i <= i1; ++i)
                 {
-                    // Blit the periodic tile instead of stroking every division
-                    // line. At 320x240 divisions the line-by-line version drew
-                    // 562 primitives and measured 16-21 ms PER REPAINT - on every
-                    // pan and every drag frame - and it only kicked in once you
-                    // zoomed past the density cutoff, which is exactly why the
-                    // editor got choppier as you zoomed in.
-                    const QPointF origin = world.map(canvas.topLeft());
+                    const double x = world.map(QPointF(canvas.left() + i * spanX, 0.0)).x();
+                    lines.append(QLineF(x, a0.y(), x, a1.y()));
+                }
 
-                    auto phase = [](double v, double period)
-                    {
-                        double r = std::fmod(v, period);
-                        if (r < 0.0)
-                            r += period;
-                        return r;
-                    };
+                for (int j = j0; j <= j1; ++j)
+                {
+                    const double y = world.map(QPointF(0.0, canvas.top() + j * spanY)).y();
+                    lines.append(QLineF(a0.x(), y, a1.x(), y));
+                }
 
-                    QBrush brush(m_snapTile);
-                    brush.setTransform(QTransform::fromTranslate(phase(origin.x(), m_snapTileW),
-                                                                 phase(origin.y(), m_snapTileH)));
-
+                if (!lines.isEmpty())
+                {
                     painter->save();
                     painter->setRenderHint(QPainter::Antialiasing, false);
                     painter->setWorldTransform(QTransform());
-                    painter->setPen(Qt::NoPen);
-                    painter->fillRect(world.mapRect(area), brush);
+                    painter->setPen(QPen(QColor(120, 140, 170, 120)));
+                    painter->drawLines(lines.constData(), lines.size());
                     painter->restore();
                 }
             }

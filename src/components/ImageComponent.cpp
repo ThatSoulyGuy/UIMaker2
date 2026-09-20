@@ -8,6 +8,8 @@
 #include "core/PixelDraw.hpp"
 #include "core/PixelModel.hpp"
 #include "core/SpriteSidecar.hpp"
+#include "core/UiElement.hpp"
+#include "components/TransformComponent.hpp"
 
 REGISTER_COMPONENT(ImageComponent, "Image")
 
@@ -36,7 +38,7 @@ void ImageComponent::Update(SceneElementItem& item, QRectF& rect, const QRectF& 
     }
 
     if (!pixmap.isNull())
-        rect = QRectF(QPointF(0.0, 0.0), pixmap.size());
+        rect = QRectF(QPointF(0.0, 0.0), PixelDraw::NaturalSize(pixmap.size()));
 }
 
 bool ImageComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
@@ -57,7 +59,7 @@ bool ImageComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
     // crop texel indices are valid against either.
     PixelDraw::DrawTexture(painter, rect, drawn,
                            slice, tex.anchor, tex.cropOffsetX, tex.cropOffsetY,
-                           static_cast<PixelDraw::Fill>(tex.fill));
+                           tex.fill);
 
     if (selected)
     {
@@ -133,6 +135,7 @@ void ImageComponent::SetImagePath(const QString& v)
 
     ReloadPixmap();
     AdoptSidecarSlice(imagePath);
+    SizeOwnerToTexture();
 
     NotifyChanged();
 }
@@ -227,7 +230,7 @@ void ImageComponent::FromJson(const QJsonObject& in)
     SetAssetDomain(in["assetDomain"].toString());
     SetAssetRegistryValue(in["assetRegistryValue"].toString());
     SetPixelated(in["pixelated"].toBool(false));
-    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillStretch));
+    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillAuto));
     SetCropAnchor(in["cropAnchor"].toInt(PixelDraw::Center));
     SetCropOffsetX(in["cropOffsetX"].toInt(0));
     SetCropOffsetY(in["cropOffsetY"].toInt(0));
@@ -311,4 +314,39 @@ void ImageComponent::AdoptSidecarSlice(const QString& path)
 
     if (meta.hasSlice)
         slice = meta.slice;
+}
+
+void ImageComponent::SizeOwnerToTexture()
+{
+    if (pixmap.isNull())
+        return;
+
+    auto* owner = qobject_cast<UiElement*>(parent());
+
+    if (!owner)
+        return;
+
+    auto* xform = owner->GetComponent<TransformComponent>();
+
+    if (!xform)
+        return;
+
+    // TransformComponent's factory default - or that default already rounded
+    // to the grid, because in PixelGrid mode the first refresh writes the
+    // snapped size back to scale before any image is assigned. Comparing only
+    // against the raw default therefore never matched. Anything else is a size
+    // the user chose and must be left alone.
+    const QPointF current = xform->GetScale();
+
+    const bool untouched =
+        (qFuzzyCompare(current.x(), 100.0) && qFuzzyCompare(current.y(), 100.0))
+     || (qFuzzyCompare(current.x(), PixelDraw::SnapLength(100.0))
+         && qFuzzyCompare(current.y(), PixelDraw::SnapLength(100.0)));
+
+    if (!untouched)
+        return;
+
+    const QSizeF natural = PixelDraw::NaturalSize(pixmap.size());
+
+    xform->SetScale(QPointF(natural.width(), natural.height()));
 }

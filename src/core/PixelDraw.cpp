@@ -27,7 +27,19 @@ namespace PixelDraw
 
     int ClampFill(int v) noexcept
     {
-        return (v == FillWrap) ? FillWrap : FillStretch;
+        return (v == FillStretch || v == FillWrap) ? v : FillAuto;
+    }
+
+    Fill ResolveFill(int fill)
+    {
+        if (fill == FillStretch)
+            return FillStretch;
+
+        if (fill == FillWrap)
+            return FillWrap;
+
+        // Auto: the rendering model decides.
+        return PixelModel::PixelSnap() ? FillWrap : FillStretch;
     }
 
     int ClampAnchor(int v) noexcept
@@ -133,6 +145,13 @@ namespace PixelDraw
         return u > 0.0 ? u : 1.0;
     }
 
+    QSizeF NaturalSize(const QSize& texels)
+    {
+        const double u = Unit();
+
+        return QSizeF(texels.width() * u, texels.height() * u);
+    }
+
     double SnapLength(double v)
     {
         if (!PixelModel::PixelSnap())
@@ -170,14 +189,14 @@ namespace PixelDraw
                      int anchor,
                      int cropOffsetX,
                      int cropOffsetY,
-                     Fill fill)
+                     int fill)
     {
         if (!painter || tex.isNull() || dest.isEmpty())
             return;
 
         const QRectF src(0.0, 0.0, tex.width(), tex.height());
 
-        if (fill == FillStretch || !PixelModel::PixelSnap())
+        if (ResolveFill(fill) != FillWrap || !PixelModel::PixelSnap())
         {
             painter->drawPixmap(dest, tex, src);
             return;

@@ -64,7 +64,7 @@ bool DragSlotComponent::Paint(QPainter* painter, const QRectF& rect, bool select
         PixelDraw::DrawTexture(painter, iconRect, m_iconPixmap,
                                slice,
                                tex.anchor, tex.cropOffsetX, tex.cropOffsetY,
-                               static_cast<PixelDraw::Fill>(tex.fill));
+                               tex.fill);
     }
     else
     {
@@ -167,7 +167,7 @@ void DragSlotComponent::FromJson(const QJsonObject& in)
     SetIconPath(in["iconPath"].toString());
     SetAssetDomain(in["assetDomain"].toString());
     SetAssetRegistryValue(in["assetRegistryValue"].toString());
-    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillStretch));
+    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillAuto));
     SetCropAnchor(in["cropAnchor"].toInt(PixelDraw::Center));
     SetCropOffsetX(in["cropOffsetX"].toInt(0));
     SetCropOffsetY(in["cropOffsetY"].toInt(0));

@@ -48,7 +48,7 @@ bool ButtonComponent::Paint(QPainter* painter, const QRectF& rect, bool selected
     // them when the path is set, so what is painted is exactly what is baked.
     const PixelDraw::Slice slice{ sliceLeft, sliceTop, sliceRight, sliceBottom };
 
-    if (tex.fill == PixelDraw::FillWrap)
+    if (PixelDraw::ResolveFill(tex.fill) == PixelDraw::FillWrap)
     {
         PixelDraw::DrawTexture(painter, rect, skin, slice,
                                tex.anchor, tex.cropOffsetX, tex.cropOffsetY,
@@ -185,7 +185,7 @@ void ButtonComponent::FromJson(const QJsonObject& in)
     SetSliceTop(in["sliceTop"].toInt(6));
     SetSliceRight(in["sliceRight"].toInt(6));
     SetSliceBottom(in["sliceBottom"].toInt(6));
-    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillStretch));
+    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillAuto));
     SetCropAnchor(in["cropAnchor"].toInt(PixelDraw::Center));
     SetCropOffsetX(in["cropOffsetX"].toInt(0));
     SetCropOffsetY(in["cropOffsetY"].toInt(0));

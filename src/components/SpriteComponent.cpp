@@ -49,7 +49,7 @@ bool SpriteComponent::Paint(QPainter* painter, const QRectF& rect, bool selected
         PixelDraw::DrawTexture(painter, rect, m_pixmap.copy(srcRect.toRect()),
                                slice,
                                tex.anchor, tex.cropOffsetX, tex.cropOffsetY,
-                               static_cast<PixelDraw::Fill>(tex.fill));
+                               tex.fill);
     }
     else
     {
@@ -155,7 +155,7 @@ void SpriteComponent::FromJson(const QJsonObject& in)
     SetColumns(in["columns"].toInt(1));
     SetAssetDomain(in["assetDomain"].toString());
     SetAssetRegistryValue(in["assetRegistryValue"].toString());
-    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillStretch));
+    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillAuto));
     SetCropAnchor(in["cropAnchor"].toInt(PixelDraw::Center));
     SetCropOffsetX(in["cropOffsetX"].toInt(0));
     SetCropOffsetY(in["cropOffsetY"].toInt(0));

@@ -481,6 +481,10 @@
        component, if it has one (section 12 names the contributors). A
        non-positive scale axis is the ONLY way to request intrinsic sizing.
 
+       For a TEXTURED component the intrinsic size is texels x Document
+       .pixelUnit, NOT the raw texel count - that is the size at which the
+       texture renders exactly one texel per virtual pixel.
+
     3. If stretch has BOTH horizontal bits set (LEFT|RIGHT, 0x03):
            W = parentW - 2 * position.x
        If stretch has BOTH vertical bits set (TOP|BOTTOM, 0x0C):
@@ -585,7 +589,7 @@
     imagePath        ASSET_REF  0xFFFFFFFF
     tint             COLOR      0xFFFFFFFF   multiply; white is identity
     pixelated        BOOL       false        nearest-neighbour hint
-    textureFill      INT32      0            section 13
+    textureFill      INT32      0            0=Auto 1=Stretch 2=Wrap, s.13
     cropAnchor       INT32      4            section 13
     cropOffsetX      INT32      0            section 13
     cropOffsetY      INT32      0            section 13
@@ -830,14 +834,19 @@
 
 13.1  Fields
 
-  textureFill   INT32   0 = STRETCH, 1 = WRAP
+  textureFill   INT32   0 = AUTO, 1 = STRETCH, 2 = WRAP
   cropAnchor    INT32   0..8, reading order, see 13.2
   cropOffsetX   INT32   signed texel shift of the horizontal tiling phase
   cropOffsetY   INT32   signed texel shift of the vertical tiling phase
 
-  R13.1  CONSUMER MUST treat a textureFill value other than 0 or 1 as 0, and a
-         cropAnchor outside 0..8 as 4 (Center). cropOffsetX and cropOffsetY are
-         NOT clamped by the producer and MAY be any i32.
+  R13.1  CONSUMER MUST treat a textureFill value outside 0..2 as 0 (AUTO), and
+         a cropAnchor outside 0..8 as 4 (Center). cropOffsetX and cropOffsetY
+         are NOT clamped by the producer and MAY be any i32.
+
+  R13.6  AUTO resolves against the document's rendering model (section 12.3):
+         WRAP when Document.renderModel is 1 (PixelGrid), STRETCH otherwise.
+         It is the default, so a document switched to PixelGrid becomes
+         texel-exact without every element being visited individually.
 
 13.2  Crop anchor values
 
@@ -850,12 +859,12 @@
       horizontal:  0,3,6 -> NEAR    1,4,7 -> CENTER    2,5,8 -> FAR
       vertical:    0,1,2 -> NEAR    3,4,5 -> CENTER    6,7,8 -> FAR
 
-13.3  STRETCH (textureFill = 0)
+13.3  STRETCH (textureFill = 1)
 
   The texture is scaled to the destination rect. This is the traditional
   behaviour and imposes no relationship between texels and pixels.
 
-13.4  WRAP (textureFill = 1)
+13.4  WRAP (textureFill = 2)
 
   One texel occupies exactly one VIRTUAL PIXEL. The texture is never scaled.
   A destination larger than the texture REPEATS it; a destination smaller

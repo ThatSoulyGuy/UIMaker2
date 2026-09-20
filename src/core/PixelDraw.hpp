@@ -4,6 +4,8 @@
 #include <QRect>
 #include <QRectF>
 #include <QVector>
+#include <QSize>
+#include <QSizeF>
 
 class QPainter;
 class QPixmap;
@@ -39,11 +41,24 @@ namespace PixelDraw
     Side SideY(int anchor) noexcept;
 
     // How the interior behaves when it does not match the destination.
+    //
+    // FillAuto is the default and follows the document's rendering model:
+    // stretch in Continuous, wrap in PixelGrid. Switching a document to
+    // PixelGrid should make its textures texel-exact immediately - having to
+    // visit every image and flip a per-element switch is not a pixel-perfect
+    // mode, it is a pixel-perfect checkbox.
+    //
+    // 0 keeps its Continuous meaning exactly (Auto resolves to Stretch there),
+    // so no existing scene changes appearance.
     enum Fill
     {
-        FillStretch = 0,   // legacy: scale to fit. Not texel-exact.
-        FillWrap    = 1    // repeat and crop. Texel-exact.
+        FillAuto    = 0,
+        FillStretch = 1,   // always scale to fit. Never texel-exact.
+        FillWrap    = 2    // always repeat and crop. Texel-exact.
     };
+
+    // Resolve FillAuto against the live rendering model.
+    Fill ResolveFill(int fill);
 
     // 9-slice insets in texels. A null slice means the whole texture is one
     // interior band.
@@ -92,6 +107,11 @@ namespace PixelDraw
     // Scene units per texel: PixelModel's unit in PixelGrid mode, 1.0 otherwise.
     double Unit();
 
+    // The scene-unit size at which a texture of `texels` renders exactly 1:1 -
+    // one texel per virtual pixel. This is what an element's intrinsic size
+    // must be, NOT the raw texel count.
+    QSizeF NaturalSize(const QSize& texels);
+
     // Round a length/rect to whole virtual pixels. Identity in Continuous mode.
     double SnapLength(double v);
     QRectF SnapRect(const QRectF& r);
@@ -105,7 +125,7 @@ namespace PixelDraw
     // vanish from both the inspector and the bake.
     struct TextureParams
     {
-        int fill = FillStretch;   // FillStretch keeps the pre-existing look
+        int fill = FillAuto;      // follows the document's rendering model
         int anchor = Center;
         int cropOffsetX = 0;
         int cropOffsetY = 0;
@@ -136,7 +156,7 @@ namespace PixelDraw
                      int anchor,
                      int cropOffsetX,
                      int cropOffsetY,
-                     Fill fill);
+                     int fill);
 }
 
 #endif

@@ -51,7 +51,7 @@ bool IconComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)
         PixelDraw::DrawTexture(painter, rect, drawn,
                                slice,
                                tex.anchor, tex.cropOffsetX, tex.cropOffsetY,
-                               static_cast<PixelDraw::Fill>(tex.fill));
+                               tex.fill);
     }
     else
     {
@@ -129,7 +129,7 @@ void IconComponent::FromJson(const QJsonObject& in)
     SetIconSize(in["iconSize"].toInt(32));
     SetAssetDomain(in["assetDomain"].toString());
     SetAssetRegistryValue(in["assetRegistryValue"].toString());
-    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillStretch));
+    SetTextureFill(in["textureFill"].toInt(PixelDraw::FillAuto));
     SetCropAnchor(in["cropAnchor"].toInt(PixelDraw::Center));
     SetCropOffsetX(in["cropOffsetX"].toInt(0));
     SetCropOffsetY(in["cropOffsetY"].toInt(0));
