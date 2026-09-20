@@ -586,29 +586,15 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent* event)
 
 void ViewportWidget::mouseDoubleClickEvent(QMouseEvent* event)
 {
-    if (event->button() == Qt::LeftButton && scene())
-    {
-        const QPointF scenePos = mapToScene(event->pos());
-        QGraphicsItem* item = nullptr;
-        const QList<QGraphicsItem*> hit = scene()->items(scenePos);
-
-        for (QGraphicsItem* it : hit)
-        {
-            if (it->flags().testFlag(QGraphicsItem::ItemIsSelectable))
-            {
-                item = it;
-                break;
-            }
-        }
-
-        if (item)
-        {
-            FitToItem(item);
-            return;
-        }
-    }
-
-    QGraphicsView::mouseDoubleClickEvent(event);
+    // Qt delivers the SECOND of two quick clicks here instead of as a press,
+    // so anything special-cased on this event silently steals every rapid
+    // repeat click. That is exactly the gesture click-through selection is
+    // built on, so route it through the ordinary press path and let the
+    // handler treat it as what the user did: another click.
+    //
+    // This used to frame the item under the cursor. F still does that (and
+    // frames the whole selection, not just one item), so nothing is lost.
+    mousePressEvent(event);
 }
 
 void ViewportWidget::wheelEvent(QWheelEvent* event)

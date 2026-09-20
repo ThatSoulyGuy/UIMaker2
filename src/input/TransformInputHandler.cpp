@@ -8,6 +8,8 @@
 #include "core/PixelModel.hpp"
 #include "components/TransformComponent.hpp"
 
+#include <QApplication>
+
 #include <cmath>
 
 #ifndef M_PI
@@ -54,6 +56,8 @@ InputResult TransformInputHandler::HandlePress(const MousePressEvent& event, Edi
 
         if (hit.IsHit())
         {
+            ResetCycle();
+            m_pressWasOnBody = false;
             m_startViewPos = event.viewPos;
             BeginDrag(selectedItems, hit.handleId, event.scenePos, sceneBounds);
 
@@ -68,58 +72,169 @@ InputResult TransformInputHandler::HandlePress(const MousePressEvent& event, Edi
     // "translate_x"/"translate_y"), grid-snapped by the same block, and named
     // "Move" by GetUndoActionName - so body drags inherit undo and snapping
     // with no new transform math.
-    if (m_gizmoManager->GetActiveGizmoId() != QStringLiteral("translate"))
-        return InputResult::NotConsumed();
 
     // Additive selection belongs to QGraphicsView, not to us.
     if (event.modifiers & (Qt::ControlModifier | Qt::ShiftModifier))
-        return InputResult::NotConsumed();
-
-    SceneElementItem* body = TopmostBodyAt(event.scenePos, ctx);
-
-    // A layout parent owns its children's positions, so dragging one only ever
-    // wrote a value the next relayout discarded.
-    if (!body || HasLayoutParent(body))
-        return InputResult::NotConsumed();
-
-    // Pressing an unselected element selects it and starts the drag in one
-    // gesture, which is what ItemIsMovable used to give us for free.
-    if (!body->isSelected() && ctx.document && body->GetElement())
     {
-        ctx.document->SetSelected(body->GetElement());
-        selectedItems = GetTopLevelSelectedItems(ctx);
+        ResetCycle();
+        return InputResult::NotConsumed();
     }
 
-    if (selectedItems.isEmpty())
-        return InputResult::NotConsumed();
+    SceneElementItem* body = PickBodyForPress(event.viewPos, event.scenePos, ctx);
 
+    // Empty canvas. Leave it to QGraphicsView so rubber-band selection still
+    // works, and end any descent in progress.
+    if (!body)
+    {
+        ResetCycle();
+        return InputResult::NotConsumed();
+    }
+
+    m_pressViewPos   = event.viewPos;
+    m_pressWasOnBody = true;
+
+    // Pressing an unselected element selects it and starts the drag in one
+    // gesture, which is what ItemIsMovable used to give us for free. When a
+    // cycle is live PickBodyForPress already returned the descended-to
+    // element, so this neither fights nor resets it.
+    if (!body->isSelected() && ctx.document && body->GetElement())
+        ctx.document->SetSelected(body->GetElement());
+
+    // Selection is ours for every tool - otherwise QGraphicsView would pick
+    // the topmost item behind our back and the descent would never stick.
+    // Dragging a body, though, belongs to the Move tool alone. A layout parent
+    // owns its children's positions, so dragging one only ever wrote a value
+    // the next relayout discarded.
+    if (m_gizmoManager->GetActiveGizmoId() != QStringLiteral("translate") || HasLayoutParent(body))
+        return InputResult::Consumed(Qt::ArrowCursor, true);
+
+    selectedItems = GetTopLevelSelectedItems(ctx);
+
+    if (selectedItems.isEmpty())
+        return InputResult::Consumed(Qt::ArrowCursor, true);
+
+    // The drag takes the CURRENT selection, so a body press that has just
+    // descended drags the element it descended to.
     m_startViewPos = event.viewPos;
     BeginDrag(selectedItems, QStringLiteral("translate_free"), event.scenePos, boundsOf(selectedItems));
 
     return InputResult::Consumed(Qt::SizeAllCursor, true);
 }
 
-SceneElementItem* TransformInputHandler::TopmostBodyAt(const QPointF& scenePos, EditorContext& ctx)
+QList<SceneElementItem*> TransformInputHandler::BodiesAt(const QPointF& scenePos, EditorContext& ctx)
 {
+    QList<SceneElementItem*> bodies;
+
     if (!ctx.document || !ctx.document->GetScene())
-        return nullptr;
+        return bodies;
 
     // items() is returned in descending stacking order, so the first selectable
-    // hit is the one the user sees on top. Slots are excluded because they are
-    // not selectable and their geometry belongs to their owning container.
+    // hit is the one the user sees on top and the last is the bottom of the
+    // stack. Slots are excluded because they are not selectable and their
+    // geometry belongs to their owning container.
     const QList<QGraphicsItem*> hits = ctx.document->GetScene()->items(scenePos);
 
     for (QGraphicsItem* gi : hits)
     {
         auto* item = dynamic_cast<SceneElementItem*>(gi);
 
-        if (!item || !(item->flags() & QGraphicsItem::ItemIsSelectable))
+        if (!item || !item->GetElement() || !(item->flags() & QGraphicsItem::ItemIsSelectable))
             continue;
 
-        return item;
+        bodies.append(item);
     }
 
-    return nullptr;
+    return bodies;
+}
+
+SceneElementItem* TransformInputHandler::TopmostBodyAt(const QPointF& scenePos, EditorContext& ctx)
+{
+    const QList<SceneElementItem*> bodies = BodiesAt(scenePos, ctx);
+
+    return bodies.isEmpty() ? nullptr : bodies.first();
+}
+
+QList<QUuid> TransformInputHandler::StackIds(const QList<SceneElementItem*>& stack)
+{
+    QList<QUuid> ids;
+    ids.reserve(stack.size());
+
+    for (SceneElementItem* item : stack)
+        ids.append(item && item->GetElement() ? item->GetElement()->GetId() : QUuid());
+
+    return ids;
+}
+
+int TransformInputHandler::CycleWindowMs()
+{
+    // Twice the double-click interval: long enough that a deliberate second
+    // click still counts, short enough that returning to the same spot a
+    // moment later starts from the top again. The floor matters because the
+    // interval is a user setting and can be configured very low.
+    return qMax(400, QApplication::doubleClickInterval() * 2);
+}
+
+void TransformInputHandler::ResetCycle()
+{
+    m_cycleDepth = 0;
+    m_cycleStack.clear();
+    m_cycleTimer.invalidate();
+}
+
+bool TransformInputHandler::CycleIsLiveAt(const QPoint& viewPos, const QList<SceneElementItem*>& stack) const
+{
+    if (!m_cycleTimer.isValid() || m_cycleTimer.elapsed() > CycleWindowMs())
+        return false;
+
+    if ((viewPos - m_cycleViewPos).manhattanLength() > kClickSlopPx)
+        return false;
+
+    // Compare identities, not the depth alone: if the stack under the cursor
+    // changed (an element was deleted, reordered or reparented between clicks)
+    // the old index points at something else entirely.
+    return StackIds(stack) == m_cycleStack;
+}
+
+SceneElementItem* TransformInputHandler::PickBodyForPress(const QPoint& viewPos, const QPointF& scenePos,
+                                                          EditorContext& ctx)
+{
+    const QList<SceneElementItem*> stack = BodiesAt(scenePos, ctx);
+
+    if (stack.isEmpty())
+        return nullptr;
+
+    if (CycleIsLiveAt(viewPos, stack) && m_cycleDepth < stack.size())
+        return stack.at(m_cycleDepth);
+
+    return stack.first();
+}
+
+void TransformInputHandler::CycleSelectionAt(const QPoint& viewPos, const QPointF& scenePos, EditorContext& ctx)
+{
+    const QList<SceneElementItem*> stack = BodiesAt(scenePos, ctx);
+
+    if (stack.isEmpty() || !ctx.document)
+    {
+        ResetCycle();
+        return;
+    }
+
+    // The first click of a run selects the top (which the press already did);
+    // each one after it descends a layer. Past the bottom it wraps, so the
+    // stack stays reachable without having to stop and start again.
+    if (CycleIsLiveAt(viewPos, stack) && stack.size() > 1)
+        m_cycleDepth = (m_cycleDepth + 1) % stack.size();
+    else
+        m_cycleDepth = 0;
+
+    m_cycleViewPos = viewPos;
+    m_cycleStack   = StackIds(stack);
+    m_cycleTimer.start();
+
+    SceneElementItem* target = stack.at(m_cycleDepth);
+
+    if (target && target->GetElement() && !target->isSelected())
+        ctx.document->SetSelected(target->GetElement());
 }
 
 bool TransformInputHandler::HasLayoutParent(SceneElementItem* item)
@@ -226,17 +341,33 @@ InputResult TransformInputHandler::HandleMove(const MouseMoveEvent& event, Edito
 
 InputResult TransformInputHandler::HandleRelease(const MouseReleaseEvent& event, EditorContext& ctx)
 {
-    Q_UNUSED(event);
+    const bool wasOnBody = m_pressWasOnBody;
+    m_pressWasOnBody = false;
+
+    // A click is a press and a release at nearly the same point. A drag is
+    // not a click and must never descend: otherwise nudging an element would
+    // hand the next gesture the one underneath it.
+    const bool isClick = wasOnBody
+                      && event.button == Qt::LeftButton
+                      && (event.viewPos - m_pressViewPos).manhattanLength() <= kClickSlopPx;
 
     if (!m_transforming)
-        return InputResult::NotConsumed();
+    {
+        // No drag was armed - a body press under a non-Move tool, or on a
+        // layout child - but the click still descends.
+        if (isClick)
+            CycleSelectionAt(event.viewPos, event.scenePos, ctx);
+        else if (wasOnBody)
+            ResetCycle();
+
+        return wasOnBody ? InputResult::Consumed(Qt::ArrowCursor, true)
+                         : InputResult::NotConsumed();
+    }
 
     m_transforming = false;
 
     if (m_gizmoManager)
         m_gizmoManager->ClearActiveHandle();
-
-    Q_UNUSED(ctx);
 
     // Build a per-element delta list. Only include elements whose pose
     // actually changed (skip ones the user grabbed but didn't ultimately
@@ -279,6 +410,11 @@ InputResult TransformInputHandler::HandleRelease(const MouseReleaseEvent& event,
 
     m_activeHandleId.clear();
     m_startStates.clear();
+
+    if (isClick)
+        CycleSelectionAt(event.viewPos, event.scenePos, ctx);
+    else
+        ResetCycle();
 
     return InputResult::Consumed(Qt::ArrowCursor, true);
 }

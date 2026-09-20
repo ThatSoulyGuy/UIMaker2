@@ -239,6 +239,17 @@ SceneElementItem* SceneDocument::CreateItemFor(UiElement* e)
         }
     }
 
+    // UiElement::AddChild emits StructureChanged from its constructor, which is
+    // BEFORE this item exists - so the z pass that ran then skipped this
+    // element and left it at the default 0. With three overlapping siblings
+    // that gave z = 0, 1, 0: the NEWEST element drew underneath the one before
+    // it, and stayed there until some unrelated structure change fixed it up.
+    //
+    // Re-run now that the item is registered. Inside a StructureBatch (load,
+    // paste, slot reconciliation) this just marks the batch dirty and the work
+    // still happens once, at the end.
+    OnStructureChanged();
+
     return item;
 }
 

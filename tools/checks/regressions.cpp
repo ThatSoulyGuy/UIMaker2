@@ -46,6 +46,7 @@
 #include "core/UiElement.hpp"
 
 #include <QApplication>
+#include <QStringList>
 #include "checks.hpp"
 #include <QByteArray>
 #include <QDataStream>
@@ -315,7 +316,12 @@ void CheckRegressions()
         p2.viewPos = view.mapFromScene(p2.scenePos);
 
         InputResult pr2 = handler.HandlePress(p2, ctx);
-        check(!pr2.consumed, "with the Rotate tool, a body press is not taken as a move");
+
+        // The handler owns SELECTION under every tool (click-through needs it,
+        // or QGraphicsView would re-pick the topmost item behind its back), so
+        // the press is consumed. What must not happen is a drag being armed.
+        check(pr2.consumed, "with the Rotate tool, a body press is still consumed (selection is ours)");
+        check(!handler.IsTransforming(), "but it arms no drag");
 
         MouseMoveEvent mv2;
         mv2.scenePos = p2.scenePos + QPointF(80.0, 80.0);
@@ -324,6 +330,198 @@ void CheckRegressions()
         qApp->processEvents();
 
         check(xf->GetPosition() == beforeRotTool, "so the Rotate tool no longer translates elements");
+    }
+
+    std::fprintf(stderr, "click-through selection cycling\n");
+    {
+        GridSnap::SetEnabled(false);
+
+        // Three panels stacked exactly on top of one another. Later siblings
+        // draw on top, so the stacking order at this point is Top, Mid, Bottom.
+        SceneDocument doc;
+
+        UiElement* bottom = doc.CreatePanelElement("Bottom", nullptr);
+        UiElement* mid    = doc.CreatePanelElement("Mid", nullptr);
+        UiElement* top    = doc.CreatePanelElement("Top", nullptr);
+
+        for (UiElement* e : { bottom, mid, top })
+        {
+            auto* xf = e->GetComponent<TransformComponent>();
+            xf->SetScale(QPointF(400.0, 300.0));
+            xf->SetPosition(QPointF(500.0, 400.0));
+        }
+
+        Settle();
+
+        QGraphicsView view(doc.GetScene());
+        view.resize(1200, 800);
+        view.centerOn(doc.GetCanvasRect().center());
+
+        GizmoManager gm;
+        gm.SetActiveGizmoId("translate");
+        TransformInputHandler handler(&gm);
+
+        EditorContext ctx; ctx.document = &doc; ctx.view = &view;
+
+        const QPointF sceneAt = doc.GetItem(top)->sceneBoundingRect().center()
+                              + QPointF(-140.0, 100.0);   // clear of the gizmo handles
+
+        check(TransformInputHandler::BodiesAt(sceneAt, ctx).size() == 3,
+              "all three overlapping panels are found under the point");
+
+        auto stackNames = [&]()
+        {
+            QStringList names;
+            for (SceneElementItem* it : TransformInputHandler::BodiesAt(sceneAt, ctx))
+                names << it->GetElement()->GetName();
+            return names.join(", ");
+        };
+
+        check(doc.GetItem(top)->zValue() > doc.GetItem(mid)->zValue()
+           && doc.GetItem(mid)->zValue() > doc.GetItem(bottom)->zValue(),
+              "each newly created sibling gets a z ABOVE the one before it");
+        if (!(doc.GetItem(top)->zValue() > doc.GetItem(mid)->zValue()))
+            std::fprintf(stderr, "      z: Bottom=%.1f Mid=%.1f Top=%.1f\n",
+                         doc.GetItem(bottom)->zValue(), doc.GetItem(mid)->zValue(),
+                         doc.GetItem(top)->zValue());
+
+        check(stackNames() == QStringLiteral("Top, Mid, Bottom"),
+              "and reported topmost first");
+        if (stackNames() != QStringLiteral("Top, Mid, Bottom"))
+            std::fprintf(stderr, "      stack was: %s\n", qPrintable(stackNames()));
+
+        // One click: press then release at the same point, no movement.
+        auto clickAt = [&](const QPointF& scenePos)
+        {
+            MousePressEvent p;
+            p.button = Qt::LeftButton;
+            p.scenePos = scenePos;
+            p.viewPos = view.mapFromScene(scenePos);
+            handler.HandlePress(p, ctx);
+
+            MouseReleaseEvent r;
+            r.button = Qt::LeftButton;
+            r.scenePos = scenePos;
+            r.viewPos = p.viewPos;
+            handler.HandleRelease(r, ctx);
+
+            qApp->processEvents();
+        };
+
+        auto selectedName = [&]() -> QString
+        {
+            UiElement* e = doc.GetPrimarySelection();
+            return e ? e->GetName() : QStringLiteral("<none>");
+        };
+
+        clickAt(sceneAt);
+        check(selectedName() == "Top", "the first click selects the topmost element");
+
+        clickAt(sceneAt);
+        check(selectedName() == "Mid", "clicking again descends one layer");
+
+        clickAt(sceneAt);
+        check(selectedName() == "Bottom", "and again reaches the bottom of the stack");
+
+        clickAt(sceneAt);
+        check(selectedName() == "Top", "past the bottom it wraps back to the top");
+        if (selectedName() != "Top")
+            std::fprintf(stderr, "      selected %s after the wrap click\n", qPrintable(selectedName()));
+
+        // A click somewhere else resets the descent.
+        clickAt(sceneAt);
+        check(selectedName() == "Mid", "descending again from the top");
+
+        const QPointF elsewhere = sceneAt + QPointF(0.0, -160.0);
+        check(TransformInputHandler::BodiesAt(elsewhere, ctx).size() == 3,
+              "the second point is still over all three panels");
+
+        clickAt(elsewhere);
+        check(selectedName() == "Top", "a click at a different point starts from the top again");
+
+        // Waiting past the window resets it too.
+        clickAt(sceneAt);
+        check(selectedName() == "Top", "first click of a fresh run selects the top");
+
+        {
+            QElapsedTimer wait; wait.start();
+            const int window = qMax(400, QApplication::doubleClickInterval() * 2);
+            while (wait.elapsed() <= window + 60)
+                qApp->processEvents();
+        }
+
+        clickAt(sceneAt);
+        check(selectedName() == "Top", "a click after the window expires selects the top, not the layer below");
+        if (selectedName() != "Top")
+            std::fprintf(stderr, "      selected %s after waiting out the window\n", qPrintable(selectedName()));
+
+        // The critical one: a DRAG must not descend, or moving an element
+        // would hand the next gesture the element underneath it.
+        // Click elsewhere first so this run starts at the top of the stack
+        // rather than continuing the descent the checks above left live.
+        clickAt(elsewhere);
+        clickAt(sceneAt);
+        check(selectedName() == "Top", "top selected before the drag");
+
+        {
+            auto* xf = top->GetComponent<TransformComponent>();
+            const QPointF before = xf->GetPosition();
+
+            MousePressEvent p;
+            p.button = Qt::LeftButton;
+            p.scenePos = sceneAt;
+            p.viewPos = view.mapFromScene(sceneAt);
+            handler.HandlePress(p, ctx);
+
+            check(handler.IsTransforming(), "pressing the already-selected top arms its drag");
+
+            MouseMoveEvent mv;
+            mv.scenePos = sceneAt + QPointF(70.0, 40.0);
+            mv.viewPos = view.mapFromScene(mv.scenePos);
+            handler.HandleMove(mv, ctx);
+            qApp->processEvents();
+
+            MouseReleaseEvent r;
+            r.button = Qt::LeftButton;
+            r.scenePos = mv.scenePos;
+            r.viewPos = mv.viewPos;
+            handler.HandleRelease(r, ctx);
+            qApp->processEvents();
+
+            check(selectedName() == "Top", "dragging does NOT descend - the dragged element stays selected");
+            check(xf->GetPosition() != before, "and the drag actually moved it");
+
+            xf->SetPosition(before);
+            Settle();
+        }
+
+        // Descending works under a non-Move tool as well, where no drag is
+        // ever armed and the release takes the early path.
+        gm.SetActiveGizmoId("rotate");
+
+        check(TransformInputHandler::BodiesAt(sceneAt, ctx).size() == 3,
+              "the drag was undone, so all three panels still overlap the point");
+
+        clickAt(sceneAt);
+        check(selectedName() == "Top", "with the Rotate tool, the first click selects the top");
+
+        clickAt(sceneAt);
+        check(selectedName() == "Mid", "and clicking again still descends");
+        if (selectedName() != "Mid")
+            std::fprintf(stderr, "      selected %s under the Rotate tool\n", qPrintable(selectedName()));
+
+        gm.SetActiveGizmoId("translate");
+
+        // A point over nothing must leave rubber-band selection to the view.
+        const QPointF empty = doc.GetCanvasRect().topLeft() - QPointF(300.0, 300.0);
+        check(TransformInputHandler::BodiesAt(empty, ctx).isEmpty(), "empty canvas has no bodies");
+
+        MousePressEvent pe;
+        pe.button = Qt::LeftButton;
+        pe.scenePos = empty;
+        pe.viewPos = view.mapFromScene(empty);
+        check(!handler.HandlePress(pe, ctx).consumed,
+              "a press on empty canvas is left to QGraphicsView for rubber-band selection");
     }
 
     std::fprintf(stderr, "renames are undoable (stage 5)\n");
