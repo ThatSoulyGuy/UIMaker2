@@ -493,11 +493,12 @@
        texture renders exactly one texel per virtual pixel.
 
     3. If stretch has BOTH horizontal bits set (LEFT|RIGHT, 0x03):
-           W = parentW - 2 * position.x
+           W = refW - 2 * position.x
        If stretch has BOTH vertical bits set (TOP|BOTTOM, 0x0C):
-           H = parentH - 2 * position.y
+           H = refH - 2 * position.y
        position acts as a symmetric inset on a stretched axis. A single
-       stretch bit on an axis has NO effect.
+       stretch bit on an axis has NO effect. (refW, refH) is the STRETCH
+       REFERENCE of R11.7 - the parent's size in every case but one.
 
     4. If the element carries a layout component (StackLayout, GridLayout,
        ScrollBox) the layout determines the element's own size by fitting its
@@ -510,6 +511,33 @@
 
   R11.4  scale is a SIZE in scene units. It is NOT a scale factor. A consumer
          that multiplies by it will be wrong by orders of magnitude.
+  R11.7  The STRETCH REFERENCE is resolved PER AXIS. Walk up from the
+         element's parent to the first ancestor that does NOT derive its own
+         size on that axis from its children, and take that ancestor's final
+         size on that axis:
+
+             StackLayout, GridLayout   both axes derived; keep walking
+             ScrollBox                 CROSS axis derived; keep walking on
+                                       that axis only. Its SCROLL axis is its
+                                       own (15.2) and stops the walk.
+             anything else             stops the walk on both axes
+
+         The two axes are resolved independently and may come from different
+         ancestors. The walk normally stops at the root element, whose own
+         size comes from its Transform (11.3). Only if every ancestor up to
+         AND INCLUDING the root derives its size from its children does the
+         walk run out; the reference is then the surface the UI is rendered
+         into - the consumer's viewport. The format carries no canvas
+         dimensions of its own, and the reference editor uses its design
+         canvas here.
+
+         Rationale: a layout's size IS its children's size (R15.1), so
+         resolving a stretch against a layout is circular - the child sizes
+         itself to the container, the container re-measures and comes out
+         larger by its padding, and each pass pushes the pair further apart.
+         It does not converge; it grows without bound. Resolving against the
+         first ancestor that owns a size is what makes "fill the space I am
+         given" mean anything, and it terminates.
 
 11.4  Position resolution
 
@@ -1083,6 +1111,11 @@
          the layout at load; the positions stored in each child's Transform
          are authoring leftovers and MUST be ignored for placement (R11.6).
 
+         Because the container's size comes from its children, it cannot also
+         hand a size DOWN to them: a stretched child resolves against the
+         first ancestor that owns a size on that axis, not against the
+         container. See R11.7.
+
 15.1  StackLayout
 
       offset = padding
@@ -1168,6 +1201,8 @@
   [ ] move the glyph rect for textOffset, nothing else              R14.8, R14.9
   [ ] round textOffset to whole virtual pixels in PixelGrid mode    R14.10
   [ ] resolve anchors and alignment with the stated precedence      R11.3
+  [ ] resolve stretch per axis against the first ancestor that
+      does not size itself from its children                        R11.7
   [ ] re-run layouts and ignore stored child positions              R15.1
   [ ] use the FINAL size for anchoring and rotation                 R11.5
 

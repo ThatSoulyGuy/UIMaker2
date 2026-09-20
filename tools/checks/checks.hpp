@@ -20,5 +20,7 @@ void CheckUiBinConformance();
 void CheckTextOffset();
 void CheckPropertyGroups();
 void CheckTreeModelReset();
+void CheckLayouts();
+void CheckLayoutStretch();
 
 #endif

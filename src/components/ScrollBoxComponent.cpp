@@ -14,6 +14,16 @@ QString ScrollBoxComponent::GetTypeName() const { return QStringLiteral("ScrollB
 int ScrollBoxComponent::UpdateOrder() const { return 100; }
 bool ScrollBoxComponent::IsLayout() const { return true; }
 
+Qt::Orientations ScrollBoxComponent::ShrinkWrapAxes() const
+{
+    // Only the CROSS axis. A scroll box keeps its extent along the scroll
+    // axis from its own Transform - that is the viewport height you scroll
+    // content through - so a child stretching along it is filling a real,
+    // independently owned size, not a circular one.
+    return m_direction == Vertical ? Qt::Orientations(Qt::Horizontal)
+                                   : Qt::Orientations(Qt::Vertical);
+}
+
 void ScrollBoxComponent::Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect)
 {
     Q_UNUSED(parentRect);

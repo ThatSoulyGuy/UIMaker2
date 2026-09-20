@@ -25,6 +25,7 @@ public:
     QString GetTypeName() const override;
     int UpdateOrder() const override;
     bool IsLayout() const override;
+    Qt::Orientations ShrinkWrapAxes() const override;
 
     void Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect) override;
     bool Paint(QPainter* painter, const QRectF& rect, bool selected) override;

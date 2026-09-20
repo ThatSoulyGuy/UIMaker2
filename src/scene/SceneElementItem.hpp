@@ -34,6 +34,17 @@ public:
 
     UiElement* GetElement() const noexcept;
 
+    // The size a STRETCH resolves against, per axis.
+    //
+    // Normally this is simply the parent's size. It differs only under a
+    // layout: a layout derives its size from its children, so a child that
+    // sizes itself to the layout closes a loop - the layout re-measures,
+    // comes out larger by its padding, and every subsequent interaction
+    // pushes it further out. This walks past any ancestor that shrink-wraps
+    // on the axis in question (Component::ShrinkWrapAxes) to the first one
+    // that owns a size, falling back to the design canvas.
+    QSizeF StretchReferenceSize() const;
+
     void setPosFromComponent(const QPointF& p);
     void setRotationFromComponent(double deg);
 

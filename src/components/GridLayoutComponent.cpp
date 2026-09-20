@@ -14,6 +14,13 @@ QString GridLayoutComponent::GetTypeName() const { return QStringLiteral("GridLa
 int GridLayoutComponent::UpdateOrder() const { return 100; }
 bool GridLayoutComponent::IsLayout() const { return true; }
 
+Qt::Orientations GridLayoutComponent::ShrinkWrapAxes() const
+{
+    // Both: columns are as wide as their widest cell, rows as tall as their
+    // tallest.
+    return Qt::Horizontal | Qt::Vertical;
+}
+
 void GridLayoutComponent::Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect)
 {
     Q_UNUSED(parentRect);

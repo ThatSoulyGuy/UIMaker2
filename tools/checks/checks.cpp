@@ -266,6 +266,8 @@ int main(int argc, char** argv)
     CheckTextOffset();
     CheckPropertyGroups();
     CheckTreeModelReset();
+    CheckLayouts();
+    CheckLayoutStretch();
     CheckRegressions();
 
     std::fprintf(stderr, "\n%s (%d failure%s)\n",

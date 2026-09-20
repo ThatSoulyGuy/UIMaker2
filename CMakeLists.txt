@@ -181,6 +181,7 @@ qt_add_executable(UIMaker2Checks
     tools/checks/regressions.cpp
     tools/checks/pixelspans.cpp
     tools/checks/textoffset.cpp
+    tools/checks/layouts.cpp
     ${UIMAKER_SOURCES}
 )
 

@@ -21,11 +21,11 @@ int TransformComponent::UpdateOrder() const
 
 void TransformComponent::Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect)
 {
-    Q_UNUSED(item);
-
     // Only compute the size here. SceneElementItem applies position/origin/rotation after
     // all component Updates have settled, using the final rect — this keeps the anchor
     // formula agreeing with the localRect that itemChange::ItemPositionHasChanged reads.
+    Q_UNUSED(parentRect);
+
     QPointF pos = position;
 
     double targetW = rect.width();
@@ -34,11 +34,24 @@ void TransformComponent::Update(SceneElementItem& item, QRectF& rect, const QRec
     if (scale.x() > 0.0) targetW = scale.x();
     if (scale.y() > 0.0) targetH = scale.y();
 
-    if (stretch.testFlag(Anchor::LEFT) && stretch.testFlag(Anchor::RIGHT))
-        targetW = parentRect.width() - pos.x() * 2.0;
+    const bool stretchX = stretch.testFlag(Anchor::LEFT) && stretch.testFlag(Anchor::RIGHT);
+    const bool stretchY = stretch.testFlag(Anchor::TOP) && stretch.testFlag(Anchor::BOTTOM);
 
-    if (stretch.testFlag(Anchor::TOP) && stretch.testFlag(Anchor::BOTTOM))
-        targetH = parentRect.height() - pos.y() * 2.0;
+    if (stretchX || stretchY)
+    {
+        // Not parentRect: under a layout the parent's size is derived from
+        // this element, so stretching to it is circular. See
+        // SceneElementItem::StretchReferenceSize - which returns exactly
+        // parentRect in every non-layout case, so this is the same behaviour
+        // everywhere else.
+        const QSizeF reference = item.StretchReferenceSize();
+
+        if (stretchX)
+            targetW = reference.width() - pos.x() * 2.0;
+
+        if (stretchY)
+            targetH = reference.height() - pos.y() * 2.0;
+    }
 
     targetW = std::max(0.0001, targetW);
     targetH = std::max(0.0001, targetH);

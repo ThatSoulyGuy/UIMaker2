@@ -14,6 +14,13 @@ QString StackLayoutComponent::GetTypeName() const { return QStringLiteral("Stack
 int StackLayoutComponent::UpdateOrder() const { return 100; }
 bool StackLayoutComponent::IsLayout() const { return true; }
 
+Qt::Orientations StackLayoutComponent::ShrinkWrapAxes() const
+{
+    // Both: the run axis is the sum of the children, the cross axis is the
+    // widest of them. Neither is a size a child can stretch into.
+    return Qt::Horizontal | Qt::Vertical;
+}
+
 void StackLayoutComponent::Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect)
 {
     Q_UNUSED(parentRect);

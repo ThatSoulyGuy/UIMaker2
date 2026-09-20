@@ -14,6 +14,11 @@ bool Component::IsLayout() const
     return false;
 }
 
+Qt::Orientations Component::ShrinkWrapAxes() const
+{
+    return {};
+}
+
 void Component::Update(SceneElementItem& item, QRectF& rect, const QRectF& parentRect)
 {
     Q_UNUSED(item);

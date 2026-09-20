@@ -263,6 +263,58 @@ void SceneElementItem::RefreshFromComponents()
     }
 }
 
+QSizeF SceneElementItem::StretchReferenceSize() const
+{
+    bool haveWidth = false;
+    bool haveHeight = false;
+
+    double width = 0.0;
+    double height = 0.0;
+
+    for (const QGraphicsItem* p = parentItem(); p && !(haveWidth && haveHeight); p = p->parentItem())
+    {
+        const auto* sei = dynamic_cast<const SceneElementItem*>(p);
+
+        if (!sei || !sei->GetElement())
+            continue;
+
+        Qt::Orientations wrapped;
+
+        for (Component* c : sei->GetElement()->GetComponents())
+            wrapped |= c->ShrinkWrapAxes();
+
+        const QRectF r = sei->boundingRect();
+
+        if (!haveWidth && !(wrapped & Qt::Horizontal))
+        {
+            width = r.width();
+            haveWidth = true;
+        }
+
+        if (!haveHeight && !(wrapped & Qt::Vertical))
+        {
+            height = r.height();
+            haveHeight = true;
+        }
+    }
+
+    // Nothing above owns a size on that axis - a layout sitting at the top of
+    // the tree - so fill the canvas, which is the only fixed thing left.
+    if (!haveWidth || !haveHeight)
+    {
+        const QRectF fallback = !screenRect.isNull() ? screenRect
+                              : (scene() ? scene()->sceneRect() : QRectF());
+
+        if (!haveWidth)
+            width = fallback.width();
+
+        if (!haveHeight)
+            height = fallback.height();
+    }
+
+    return QSizeF(width, height);
+}
+
 void SceneElementItem::setPosFromComponent(const QPointF& p)
 {
     ignorePositionFeedback = true;
