@@ -63,20 +63,20 @@ namespace uibin
 
     quint8 Reader::U8()
     {
-        if (cur+1>size){bad=true;return 0;}
+        if (size-cur < 1){bad=true;return 0;}
         return quint8(data[cur++]);
     }
 
     quint16 Reader::U16()
     {
-        if (cur+2>size){bad=true;return 0;}
+        if (size-cur < 2){bad=true;return 0;}
         quint16 v = quint8(data[cur]) | (quint16(quint8(data[cur+1]))<<8);
         cur+=2; return v;
     }
 
     quint32 Reader::U32()
     {
-        if (cur+4>size){bad=true;return 0;}
+        if (size-cur < 4){bad=true;return 0;}
         quint32 v = quint8(data[cur])
                   | (quint32(quint8(data[cur+1]))<<8)
                   | (quint32(quint8(data[cur+2]))<<16)
@@ -88,7 +88,7 @@ namespace uibin
 
     quint64 Reader::U64()
     {
-        if (cur+8>size){bad=true;return 0;}
+        if (size-cur < 8){bad=true;return 0;}
         quint64 v=0;
         for (int i=0;i<8;++i) v |= quint64(quint8(data[cur+i]))<<(8*i);
         cur+=8; return v;
@@ -103,7 +103,7 @@ namespace uibin
 
     QByteArray Reader::Bytes(int n)
     {
-        if (n<0 || cur+n>size){bad=true;return QByteArray();}
+        if (n<0 || n>size-cur){bad=true;return QByteArray();}
         QByteArray b(data+cur, n); cur+=n; return b;
     }
 }

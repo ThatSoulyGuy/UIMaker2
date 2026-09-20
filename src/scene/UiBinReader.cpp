@@ -9,6 +9,8 @@
 #include <QColor>
 #include <QPointF>
 
+#include <limits>
+
 using namespace uibin;
 
 namespace
@@ -31,7 +33,19 @@ namespace
         const QString typeName = ctx.Str(r.U32());
         const quint32 payloadLen = r.U32();
         const int payloadStart = r.pos();
-        const int payloadEnd = payloadStart + int(payloadLen);
+
+        // payloadLen is attacker-controlled: compute the end in 64-bit and reject
+        // anything that cannot be a position in this buffer, rather than letting
+        // the addition wrap and hand seek() a bogus-but-in-range cursor.
+        const qint64 payloadEnd64 = qint64(payloadStart) + qint64(payloadLen);
+
+        if (payloadEnd64 > qint64(std::numeric_limits<int>::max()))
+        {
+            r.seek(-1);   // forces the reader into its error state
+            return;
+        }
+
+        const int payloadEnd = int(payloadEnd64);
 
         Component* comp = Component::Create(typeName, el);
 
@@ -92,8 +106,18 @@ namespace
         r.seek(payloadEnd);
     }
 
-    UiElement* ReadElement(Reader& r, const Ctx& ctx, UiElement* parent)
+    // A child record costs only 26 bytes on disk, so an uncapped recursion lets a
+    // few-MB file blow the stack. No authored UI nests anywhere near this deep.
+    constexpr int kMaxElementDepth = 64;
+
+    UiElement* ReadElement(Reader& r, const Ctx& ctx, UiElement* parent, int depth = 0)
     {
+        if (depth > kMaxElementDepth)
+        {
+            r.seek(-1);   // forces the reader into its error state
+            return nullptr;
+        }
+
         const QString name = ctx.Str(r.U32());
         const QByteArray uuid = r.Bytes(16);
 
@@ -109,7 +133,7 @@ namespace
 
         const quint32 childCount = r.U32();
         for (quint32 i = 0; i < childCount && r.ok(); ++i)
-            ReadElement(r, ctx, el);
+            ReadElement(r, ctx, el, depth + 1);
 
         return el;
     }

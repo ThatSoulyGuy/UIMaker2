@@ -3,6 +3,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
+#include <QHash>
 #include <QIODevice>
 #include <QString>
 #include <QStringList>
@@ -10,6 +12,43 @@
 void AssetContext::SetBaseDir(const QString& dir)
 {
     BaseDirRef() = dir;
+}
+
+QString AssetContext::RegisterFont(const QString& rel)
+{
+    if (rel.isEmpty())
+        return QString();
+
+    const QString abs = Resolve(rel);
+
+    if (abs.isEmpty())
+        return QString();
+
+    // Keyed on the resolved path so the same file reached through two different
+    // project roots still resolves to one registration. A miss is cached as an
+    // empty family too, so a broken path is not retried on every keystroke.
+    static QHash<QString, QString> cache;
+
+    const auto hit = cache.constFind(abs);
+
+    if (hit != cache.constEnd())
+        return hit.value();
+
+    QString family;
+
+    const int id = QFontDatabase::addApplicationFont(abs);
+
+    if (id != -1)
+    {
+        const QStringList fams = QFontDatabase::applicationFontFamilies(id);
+
+        if (!fams.isEmpty())
+            family = fams.first();
+    }
+
+    cache.insert(abs, family);
+
+    return family;
 }
 
 QString AssetContext::BaseDir()

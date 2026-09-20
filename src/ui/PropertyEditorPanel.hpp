@@ -43,6 +43,14 @@ public:
     // keyboard focus sits inside the panel.
     void RefreshTargets();
 
+    // Suspend rebuilds for the duration of a viewport gesture. The transform
+    // handler writes TransformComponent once per mouse-move, and each write posts
+    // a queued ComponentChanged; rebuilding the whole panel at input rate cost
+    // ~1.8 ms per frame and made the inspector flicker under the cursor. Call
+    // SetLive(false) on TransformStarted and SetLive(true) + RefreshTargets() on
+    // TransformEnded.
+    void SetLive(bool on);
+
 signals:
 
     void PropertyEdited();
@@ -76,6 +84,15 @@ private:
 
     bool suppressRebuild = false;
     bool pendingRebuild = false;
+
+    // Coalesces the queued Rebuild. ComponentChanged is delivered queued, one per
+    // property write, so a gizmo drag used to post one singleShot(0, Rebuild) per
+    // mouse-move - each one tearing down and re-creating every widget in the panel.
+    bool rebuildQueued = false;
+
+    // False while a viewport transform is in flight: the panel holds still and
+    // refreshes once on mouse-up instead of rebuilding per frame.
+    bool live = true;
 };
 
 #endif

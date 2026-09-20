@@ -8,6 +8,11 @@
 #include <QGraphicsItem>
 #include <QGraphicsScene>
 #include <QColor>
+#include <QPixmap>
+#include <QBrush>
+#include <QPaintDevice>
+
+#include <algorithm>
 #include <cmath>
 
 #include "tools/ToolManager.hpp"
@@ -28,6 +33,14 @@ ViewportWidget::ViewportWidget(QWidget* parent)
     , m_renderPipeline(new RenderPipeline(this))
 {
     UpdateRenderMode();
+
+    // The gizmo overlay is painted in paintEvent, outside the scene's dirty-region
+    // bookkeeping, so under the default MinimalViewportUpdate any scene-driven
+    // repaint (a property edit, an undo) reblits only the changed item rect and
+    // leaves gizmo pixels smeared across the canvas. Affordable now that the dot
+    // grid is a single blit rather than thousands of ellipses.
+    setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
+
     setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
     setResizeAnchor(QGraphicsView::AnchorViewCenter);
     setDragMode(QGraphicsView::RubberBandDrag);
@@ -56,8 +69,10 @@ void ViewportWidget::SetDocument(SceneDocument* document)
 
     m_document = document;
 
-    if (m_document)
-        setScene(m_document->GetScene());
+    // Detach from the outgoing scene when clearing. Callers null this out before
+    // `delete document` precisely so no paint can run against a freed scene; not
+    // calling setScene(nullptr) here left the view holding the dead one.
+    setScene(m_document ? m_document->GetScene() : nullptr);
 }
 
 SceneDocument* ViewportWidget::GetDocument() const noexcept
@@ -107,41 +122,102 @@ void ViewportWidget::FitToScene()
     fitInView(target, Qt::KeepAspectRatio);
 }
 
+bool ViewportWidget::EnsureGridTile(double zoom, double dpr)
+{
+    constexpr double kStep   = 16.0;   // grid spacing, scene units
+    constexpr double kRadius = 1.2;    // dot radius, scene units
+    constexpr double kMinCellPx = 3.0; // below this the dots are just a wash
+
+    const double cellPx = kStep * zoom;   // logical px between dots
+
+    if (cellPx < kMinCellPx)
+        return false;
+
+    if (!m_gridTile.isNull()
+        && qFuzzyCompare(m_gridTileZoom, zoom)
+        && qFuzzyCompare(m_gridTileDpr, dpr))
+    {
+        return true;
+    }
+
+    // Pack several cells into one tile so the whole-pixel rounding of the tile
+    // edge is amortised: the residual spacing error is under half a pixel per
+    // tile rather than per cell. Cap the tile so a deep zoom-in cannot allocate
+    // an enormous pixmap.
+    const int cells = std::max(1, std::min(8, int(std::ceil(256.0 / cellPx))));
+    const int tilePx = std::max(1, int(std::lround(cellPx * cells)));
+
+    const int physical = std::max(1, int(std::lround(tilePx * dpr)));
+
+    QPixmap tile(physical, physical);
+    tile.setDevicePixelRatio(dpr);
+    tile.fill(Qt::transparent);
+
+    {
+        // The pixmap carries a device pixel ratio, so this painter works in the
+        // same logical units as the viewport.
+        QPainter p(&tile);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(110, 110, 115));
+
+        const double cell = double(tilePx) / cells;
+        const double r = std::max(0.35, kRadius * zoom);
+
+        for (int i = 0; i < cells; ++i)
+        {
+            for (int j = 0; j < cells; ++j)
+                p.drawEllipse(QPointF((i + 0.5) * cell, (j + 0.5) * cell), r, r);
+        }
+    }
+
+    m_gridTile     = tile;
+    m_gridTileZoom = zoom;
+    m_gridTileDpr  = dpr;
+    m_gridTileSize = tilePx;
+    m_gridCell     = double(tilePx) / cells;
+
+    return true;
+}
+
 void ViewportWidget::drawBackground(QPainter* painter, const QRectF& rect)
 {
     // Solid fill from the scene's background brush.
     QGraphicsView::drawBackground(painter, rect);
 
-    // World-space dot grid: the dots sit at fixed scene coordinates and are
-    // drawn in scene coordinates, so the whole grid scales with zoom - bigger
-    // as you zoom in, smaller as you zoom out - exactly like the canvas
-    // content. Drawing them as vector circles instead of a scaled pixmap is
-    // what keeps them crisp at every zoom level.
+    // World-space dot grid. The dots still sit at fixed scene coordinates and
+    // still scale with zoom, but they are blitted from a cached tile rather than
+    // stroked one ellipse at a time, so the cost is flat in the exposed area and
+    // in the zoom level. The tile is rendered at device resolution, so the dots
+    // stay as crisp as the vector version.
     {
-        const double step = 16.0;     // grid spacing, scene units
-        const double radius = 1.2;    // dot radius, scene units
+        const QTransform world = painter->worldTransform();
+        const double zoom = world.m11();
+        const double dpr  = painter->device() ? painter->device()->devicePixelRatioF() : 1.0;
 
-        const double left = std::floor(rect.left() / step) * step;
-        const double top = std::floor(rect.top() / step) * step;
-
-        // At extreme zoom-out the grid collapses to a sub-pixel haze; skip
-        // drawing there so the dot count (and paint cost) stays bounded.
-        const double cols = (rect.right() - left) / step + 1.0;
-        const double rows = (rect.bottom() - top) / step + 1.0;
-
-        if (cols * rows <= 50000.0)
+        if (zoom > 0.0 && EnsureGridTile(zoom, dpr))
         {
-            painter->save();
-            painter->setRenderHint(QPainter::Antialiasing, true);
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor(110, 110, 115));
+            // Anchor the tiling so that a dot centre lands exactly on scene
+            // (0,0) and therefore on every scene multiple of the grid step. Tile
+            // dots sit at half-cell offsets, hence the -0.5 cell.
+            const QPointF origin = world.map(QPointF(0.0, 0.0));
 
-            for (double x = left; x <= rect.right(); x += step)
+            auto phase = [this](double v)
             {
-                for (double y = top; y <= rect.bottom(); y += step)
-                    painter->drawEllipse(QPointF(x, y), radius, radius);
-            }
+                const double t = double(m_gridTileSize);
+                double r = std::fmod(v - 0.5 * m_gridCell, t);
+                if (r < 0.0)
+                    r += t;
+                return r;
+            };
 
+            QBrush brush(m_gridTile);
+            brush.setTransform(QTransform::fromTranslate(phase(origin.x()), phase(origin.y())));
+
+            painter->save();
+            painter->setWorldTransform(QTransform());   // blit in device space
+            painter->setPen(Qt::NoPen);
+            painter->fillRect(world.mapRect(rect), brush);
             painter->restore();
         }
     }

@@ -438,6 +438,31 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::UIMake
     BuildViewMenu();
     ConnectActions();
 
+    // Hold the property panel still for the duration of a gizmo gesture. The
+    // transform handler writes TransformComponent once per mouse-move and each
+    // write posts a queued ComponentChanged, so the panel used to tear down and
+    // rebuild every widget in it at input rate - roughly 1.8 ms per frame for a
+    // Button, and a visible flicker under the cursor. One refresh on mouse-up
+    // shows the same final numbers.
+    if (auto* tools = m_viewport->GetToolManager())
+    {
+        connect(tools, &ToolManager::TransformStarted, this, [this]()
+        {
+            if (propertyPanel)
+                propertyPanel->SetLive(false);
+        });
+
+        connect(tools, &ToolManager::TransformEnded, this,
+                [this](const QList<TransformDelta>&, const QString&)
+        {
+            if (propertyPanel)
+            {
+                propertyPanel->SetLive(true);
+                propertyPanel->RefreshTargets();
+            }
+        });
+    }
+
     // Reopen the scene the user last had open; fall back to seeding demo
     // content on a fresh install or if that file is missing/unreadable.
     QSettings settings;
@@ -482,6 +507,10 @@ bool MainWindow::OpenSceneFile(const QString& path)
     // Undo commands hold raw pointers into the old document; drop them before
     // it goes away or Ctrl+Z would dereference freed memory.
     undoStack->clear();
+
+    // The viewport holds the document and its scene raw. Detach before the
+    // delete so nothing dispatched in between can paint against freed memory.
+    m_viewport->SetDocument(nullptr);
 
     delete document;
     document = newDoc;
@@ -558,8 +587,14 @@ void MainWindow::BuildHierarchyDock()
 
     hierarchyView = new QTreeView(contents);
     hierarchyView->setHeaderHidden(true);
-    hierarchyView->setExpandsOnDoubleClick(true);
-    hierarchyView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::SelectedClicked);
+    // Off, because DoubleClicked is now an edit trigger below - otherwise one
+    // double-click would both start a rename and toggle the branch. The
+    // expand/collapse arrow still works.
+    hierarchyView->setExpandsOnDoubleClick(false);
+    // NOT SelectedClicked: it means "a click on an already-selected row starts
+    // editing", which collides head-on with the InternalMove drag enabled below -
+    // trying to drag a selected row popped a rename editor instead.
+    hierarchyView->setEditTriggers(QAbstractItemView::EditKeyPressed | QAbstractItemView::DoubleClicked);
     hierarchyView->setDragDropMode(QAbstractItemView::InternalMove);
     hierarchyView->setDefaultDropAction(Qt::MoveAction);
     hierarchyView->setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -666,8 +701,10 @@ void MainWindow::FinishAddElement(UiElement* e, const QString& name)
 
     undoStack->push(new StructuralCommand(document, { op }, "Add " + name));
 
-    hierarchyModel->OnStructureChanged();
-
+    // No explicit hierarchyModel->OnStructureChanged() here: UiElement::AddChild
+    // already emitted root->StructureChanged() before we were called, and the
+    // model is connected to it. Calling it again cost a second full model reset,
+    // a second recursive ConnectNameSignals walk and a second expandAll().
     auto idx = hierarchyModel->GetIndexFromElement(e);
     hierarchySelection->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
 
@@ -996,6 +1033,11 @@ void MainWindow::ConnectActions()
         // before it goes away or Ctrl+Z would dereference freed memory.
         undoStack->clear();
 
+        // Detach the viewport first: the lines below (SyncRenderModelChecks,
+        // UpdateRenderMode) run between the delete and the re-attach, and
+        // UpdateRenderMode posts a viewport repaint.
+        m_viewport->SetDocument(nullptr);
+
         delete document;
 
         document = new SceneDocument(this);
@@ -1089,11 +1131,16 @@ void MainWindow::ConnectActions()
     ui->ActionDuplicate->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_D));
     connect(ui->ActionDuplicate, &QAction::triggered, this, &MainWindow::DoDuplicate);
 
-    ui->ActionDelete->setShortcut(QKeySequence::Delete);
+    // QKeySequence::Delete is forward-delete on macOS, which a laptop keyboard has
+    // no key for - the big key above Return sends Backspace. Bind both.
+    ui->ActionDelete->setShortcuts({ QKeySequence::Delete, QKeySequence(Qt::Key_Backspace) });
     connect(ui->ActionDelete, &QAction::triggered, this, &MainWindow::DoDelete);
 
-    ui->ActionUndo_2->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Z));
-    ui->ActionRedo_2->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_R));
+    // Standard sequences rather than hand-rolled ones: Ctrl/Cmd+R is not redo on
+    // any platform, and it sits one modifier away from the plain R that switches
+    // to the Scale tool.
+    ui->ActionUndo_2->setShortcut(QKeySequence::Undo);
+    ui->ActionRedo_2->setShortcuts(QKeySequence::keyBindings(QKeySequence::Redo));
 
     connect(ui->ActionUndo_2, &QAction::triggered, this, &MainWindow::DoUndo);
     connect(ui->ActionRedo_2, &QAction::triggered, this, &MainWindow::DoRedo);
@@ -1106,6 +1153,10 @@ void MainWindow::WireHierarchySignals()
 
     connect(hierarchySelection, &QItemSelectionModel::selectionChanged, this, [this](const QItemSelection&, const QItemSelection&)
     {
+        // Ignore the echo of our own document -> tree mirroring (AttachScene).
+        if (syncingTreeSelection)
+            return;
+
         // Push the tree's selection into the document; the SceneDocument::SelectionChanged
         // listener takes care of mirroring back to the property panel and viewport.
         document->SetSelectedElements(SelectedElements());
@@ -1137,9 +1188,13 @@ void MainWindow::AttachScene(QGraphicsScene* scene)
     {
         m_viewport->viewport()->update();
 
-        // Mirror the document's selection into the tree view without re-triggering the
-        // hierarchy -> document handler.
-        QSignalBlocker blocker(hierarchySelection);
+        // Mirror the document's selection into the tree view without re-triggering
+        // the hierarchy -> document handler. The guard is a flag rather than a
+        // QSignalBlocker so the view still receives selectionChanged and actually
+        // repaints and scrolls - blocking it is why clicking an element on the
+        // canvas left its tree row unhighlighted until you happened to mouse over it.
+        syncingTreeSelection = true;
+
         QItemSelection itemSel;
         for (UiElement* e : selected)
         {
@@ -1150,8 +1205,15 @@ void MainWindow::AttachScene(QGraphicsScene* scene)
         hierarchySelection->select(itemSel, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
 
         if (!selected.isEmpty())
-            hierarchySelection->setCurrentIndex(hierarchyModel->GetIndexFromElement(selected.last()),
-                                                QItemSelectionModel::Current | QItemSelectionModel::Rows);
+        {
+            const QModelIndex cur = hierarchyModel->GetIndexFromElement(selected.last());
+            hierarchySelection->setCurrentIndex(cur, QItemSelectionModel::Current | QItemSelectionModel::Rows);
+
+            if (cur.isValid())
+                hierarchyView->scrollTo(cur, QAbstractItemView::EnsureVisible);
+        }
+
+        syncingTreeSelection = false;
 
         propertyPanel->SetTargets(selected);
     });
@@ -1205,7 +1267,11 @@ static QList<UiElement*> FilterDeletable(const QList<UiElement*>& src, UiElement
 
 void MainWindow::DoCopy()
 {
-    const QList<UiElement*> selected = SelectedElements();
+    // Same filter DoCut/DoDuplicate/DoDelete use. ToJson serialises the whole
+    // subtree, so without it a parent+child selection wrote the child twice -
+    // once nested inside the parent and once as its own top-level entry - and
+    // pasting produced a duplicated child.
+    const QList<UiElement*> selected = FilterDeletable(SelectedElements(), document->GetRoot());
 
     if (selected.isEmpty())
         return;

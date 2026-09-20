@@ -18,8 +18,18 @@ QUuid UiElement::GetId() const noexcept
 
 void UiElement::SetId(const QUuid& value)
 {
-    if (!value.isNull())
-        id = value;
+    // A null id means the source (a hand-edited scene.json, a corrupt .uibin)
+    // had no usable "id". Keeping the freshly generated one is the safe
+    // fallback, but it silently orphans every undo record and selection restore
+    // keyed to the original - so at least say so.
+    if (value.isNull())
+    {
+        qWarning("UiElement::SetId: ignoring null UUID for element \"%s\"; keeping generated id %s",
+                 qUtf8Printable(name), qUtf8Printable(id.toString(QUuid::WithoutBraces)));
+        return;
+    }
+
+    id = value;
 }
 
 QString UiElement::GetName() const noexcept
@@ -34,8 +44,14 @@ void UiElement::SetName(const QString& value)
 
     name = value;
 
+    // NameChanged only. A rename changes no parentage, no ordering and no
+    // geometry: EntityTreeModel turns NameChanged into a precise dataChanged,
+    // and nothing in the scene layer reads GetName(). Emitting StructureChanged
+    // here used to reset the whole tree model (clearing the tree selection,
+    // which silently broke Delete/Copy/Duplicate right after a rename), rewalk
+    // every name connection, walk the items map twice, reassign every z-value
+    // and relayout every layout owner.
     emit NameChanged(name);
-    emit StructureChanged();
 }
 
 std::vector<Component*> UiElement::GetComponents() const

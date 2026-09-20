@@ -35,6 +35,15 @@ public:
     // the stored relative key ("assets/name.ext"). Empty on failure / no root.
     static QString ImportToAssets(const QString& srcAbs);
 
+    // Register a scene-relative font file with the application font database and
+    // return its family name (empty if it could not be loaded).
+    //
+    // Cached on the resolved absolute path, because QFontDatabase has no
+    // reference counting and nothing here ever calls removeApplicationFont:
+    // every scene load, every undo/redo of a fontPath edit and every paste used
+    // to re-register the same .ttf from scratch.
+    static QString RegisterFont(const QString& rel);
+
 private:
 
     static QString& BaseDirRef();

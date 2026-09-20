@@ -83,7 +83,39 @@ QRectF SceneDocument::GetCanvasRect() const noexcept
 
 SceneDocument::~SceneDocument()
 {
+    // Order matters. The QGraphicsScene is a QObject child of this document, so
+    // it (and every SceneElementItem in it) would otherwise be destroyed AFTER
+    // this body runs - with each item still holding a raw UiElement* into the
+    // tree we just freed. SceneElementItem dereferences that pointer in paint(),
+    // RefreshFromComponents() and itemChange(). Tear the items down first, while
+    // their elements are still alive, then drop the tree.
+    // Two passes, and the order within them matters: SceneElementItems are
+    // parented to each other via setParentItem, so deleting one destroys its
+    // descendants too. Detach everything first, then delete each exactly once -
+    // a single pass double-frees every nested element.
+    const QList<SceneElementItem*> all = items.values();
+
+    for (SceneElementItem* item : all)
+    {
+        if (item)
+            item->setParentItem(nullptr);
+    }
+
+    items.clear();
+
+    for (SceneElementItem* item : all)
+    {
+        if (!item)
+            continue;
+
+        if (scene)
+            scene->removeItem(item);
+
+        delete item;
+    }
+
     delete root;
+    root = nullptr;
 }
 
 // Root-scoped connections are re-established on every load (the root is
@@ -596,12 +628,11 @@ void SceneDocument::DeleteElement(UiElement* e)
 
     SetSelected(nullptr);
 
-    UiElement* parent = qobject_cast<UiElement*>(e->parent());
     RemoveElementInternal(e);
 
-    if (parent)
-        emit parent->StructureChanged();
-
+    // One emit is enough: both the parent's and the root's StructureChanged land
+    // on this document's OnStructureChanged, and EntityTreeModel listens only on
+    // the root. The parent emit was pure duplicated work.
     emit root->StructureChanged();
 }
 

@@ -103,6 +103,12 @@ private:
 
     QMetaObject::Connection sceneSelectionConnection;
 
+    // Guards the document -> tree half of the selection round trip. A
+    // QSignalBlocker cannot be used here: QTreeView repaints its selection and
+    // autoscrolls in response to the selection model's own signals, so blocking
+    // them updates the internal state and never schedules the repaint.
+    bool syncingTreeSelection = false;
+
     QUndoStack* undoStack = nullptr;
 
     static constexpr const char* kElementMime = "application/x-uimaker2-element";

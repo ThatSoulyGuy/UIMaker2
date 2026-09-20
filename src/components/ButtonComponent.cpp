@@ -83,16 +83,10 @@ void ButtonComponent::SetFontPath(const QString& v)
 {
     if (fontPath == v) return;
     fontPath = v;
-    if (!fontPath.isEmpty())
-    {
-        int id = QFontDatabase::addApplicationFont(AssetContext::Resolve(fontPath));
-        if (id != -1)
-        {
-            const QStringList fams = QFontDatabase::applicationFontFamilies(id);
-            if (!fams.isEmpty())
-                fontFamily = fams.first();
-        }
-    }
+    // Cached registration: QFontDatabase has no refcounting and nothing ever
+    // removes an application font, so re-registering per assignment leaked.
+    if (const QString fam = AssetContext::RegisterFont(fontPath); !fam.isEmpty())
+        fontFamily = fam;
     NotifyChanged();
 }
 

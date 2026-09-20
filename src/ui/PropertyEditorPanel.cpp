@@ -26,6 +26,10 @@
 #include <QTimer>
 #include <QFile>
 #include <QSet>
+#include <QAbstractButton>
+#include <QScrollBar>
+
+#include <limits>
 
 static Component* ComponentOfKind(UiElement* el, const QString& kind)
 {
@@ -151,6 +155,33 @@ void PropertyEditorPanel::RefreshTargets()
     Rebuild();
 }
 
+namespace
+{
+    // QObject::property() hands back an enum/QFlags property as its declared type,
+    // while the panel's anchors/alignment/stretch editors write a plain int. In Qt6
+    // QVariant equality across two different metatypes is unconditionally false, so
+    // a straight `before != value` reported every such edit as a change and pushed a
+    // no-op command - re-picking the anchors you already had filled the undo stack.
+    bool SamePropertyValue(const QVariant& before, const QVariant& after)
+    {
+        if (before.metaType() == after.metaType())
+            return before == after;
+
+        const bool enumLike = (before.metaType().flags() & QMetaType::IsEnumeration)
+                           || (after.metaType().flags()  & QMetaType::IsEnumeration);
+
+        if (!enumLike)
+            return before == after;
+
+        bool okBefore = false;
+        bool okAfter  = false;
+        const int a = before.toInt(&okBefore);
+        const int b = after.toInt(&okAfter);
+
+        return okBefore && okAfter && a == b;
+    }
+}
+
 void PropertyEditorPanel::ApplyPropertyChange(QObject* primary, const QByteArray& propName, const QVariant& value)
 {
     if (!primary)
@@ -165,7 +196,7 @@ void PropertyEditorPanel::ApplyPropertyChange(QObject* primary, const QByteArray
         const QVariant before = obj->property(propName.constData());
         obj->setProperty(propName.constData(), value);
 
-        if (!elementId.isNull() && before != value)
+        if (!elementId.isNull() && !SamePropertyValue(before, value))
             records.append({ elementId, kind, propName, before, value });
     };
 
@@ -211,14 +242,43 @@ void PropertyEditorPanel::ApplyPropertyChange(QObject* primary, const QByteArray
         emit PropertyChangeApplied(records);
 }
 
+void PropertyEditorPanel::SetLive(bool on)
+{
+    if (live == on)
+        return;
+
+    live = on;
+
+    // Anything that arrived while suspended is folded into one rebuild here.
+    if (live && pendingRebuild)
+    {
+        pendingRebuild = false;
+        Rebuild();
+    }
+}
+
 void PropertyEditorPanel::OnComponentChanged()
 {
     if (suppressRebuild)
         return;
 
+    // A viewport gesture is in flight; hold still and catch up on mouse-up.
+    if (!live)
+    {
+        pendingRebuild = true;
+        return;
+    }
+
     QWidget* fw = QApplication::focusWidget();
 
-    const bool editingInPanel = fw && (this->isAncestorOf(fw)) && (qobject_cast<QLineEdit*>(fw) || qobject_cast<QAbstractSpinBox*>(fw) || qobject_cast<QComboBox*>(fw));
+    // QAbstractButton covers the checkbox editors and the colour button: with
+    // focus on one of those, a queued rebuild would deleteLater() the very widget
+    // being clicked, out from under the click.
+    const bool editingInPanel = fw && (this->isAncestorOf(fw))
+        && (qobject_cast<QLineEdit*>(fw)
+         || qobject_cast<QAbstractSpinBox*>(fw)
+         || qobject_cast<QComboBox*>(fw)
+         || qobject_cast<QAbstractButton*>(fw));
 
     if (editingInPanel)
     {
@@ -226,6 +286,12 @@ void PropertyEditorPanel::OnComponentChanged()
         return;
     }
 
+    // Coalesce: ComponentChanged is queued and arrives once per property write, so
+    // a multi-select edit or a drag frame produced one full panel rebuild each.
+    if (rebuildQueued)
+        return;
+
+    rebuildQueued = true;
     QTimer::singleShot(0, this, [this](){ Rebuild(); });
 }
 
@@ -324,6 +390,11 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
 
         box->setDecimals(3);
 
+        // Commit on editingFinished/stepping only. With tracking on, clearing "100"
+        // and typing "250" applied 2, then 25, then 250 - three full relayouts and
+        // three undo records for one edit.
+        box->setKeyboardTracking(false);
+
         if (mixed)
         {
             // Park at an out-of-range sentinel so the box shows "mixed" with no number.
@@ -362,15 +433,21 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
     {
         auto* box = new QSpinBox();
 
+        box->setKeyboardTracking(false);
+
+        // Full int range. The old 0..4096 clamp applied to EVERY int property in
+        // the app, so a legitimately negative value could be displayed but never
+        // typed back - RadialMenuComponent::highlightIndex defaults to -1 ("no
+        // highlight"), showed as 0, and was unrecoverable once touched.
         if (mixed)
         {
-            box->setRange(-1, 4096);
+            box->setRange(std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
             box->setSpecialValueText(QStringLiteral("mixed"));
             box->setValue(box->minimum());
         }
         else
         {
-            box->setRange(0, 4096);
+            box->setRange(std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
             box->setValue(object->property(prop.name()).toInt());
         }
 
@@ -537,13 +614,19 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
             edit->setPlaceholderText(QStringLiteral("mixed"));
 
         QPointer<QObject> obj = object;
+        QPointer<QLineEdit> editp = edit;
 
-        QObject::connect(edit, &QLineEdit::textEdited, this, [this, obj, prop](const QString& v)
+        // editingFinished, not textEdited: this matches the name field and the
+        // *Path editor, and it matters most for a TabContainer's tabNames, where
+        // every keystroke used to run SceneDocument::EnsureSlots - creating and
+        // destroying whole slot subtrees and resetting the tree model per character.
+        // PropertyEditCommand::mergeWith still collapses the edit into one undo step.
+        QObject::connect(edit, &QLineEdit::editingFinished, this, [this, obj, prop, editp]()
         {
-            if (!obj)
+            if (!obj || !editp)
                 return;
             suppressRebuild = true;
-            ApplyPropertyChange(obj, prop.name(),v);
+            ApplyPropertyChange(obj, prop.name(), editp->text());
             suppressRebuild = false;
             emit PropertyEdited();
         });
@@ -806,6 +889,10 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         x->setDecimals(3);
         y->setDecimals(3);
 
+        // See the scalar double editor: commit on editingFinished, not per keystroke.
+        x->setKeyboardTracking(false);
+        y->setKeyboardTracking(false);
+
         const QPointF p = object->property(prop.name()).toPointF();
 
         if (mixed)
@@ -873,27 +960,53 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
 #endif
         )
     {
-        auto* button = new QPushButton(mixed
-            ? QStringLiteral("mixed")
-            : object->property(prop.name()).value<QColor>().name(QColor::HexArgb));
+        // Show the colour on the button, not just its hex string, so you can read a
+        // swatch without opening the dialog. Chequerboard-free: a flat fill over a
+        // dark panel reads alpha well enough.
+        auto paintSwatch = [](QPushButton* b, const QColor& c)
+        {
+            b->setText(c.name(QColor::HexArgb));
+            b->setStyleSheet(QStringLiteral(
+                "text-align:left; padding-left:6px;"
+                "background-color: rgba(%1,%2,%3,%4);"
+                "color: %5;")
+                .arg(c.red()).arg(c.green()).arg(c.blue()).arg(c.alpha())
+                .arg(c.lightnessF() > 0.5 && c.alpha() > 96 ? "#111" : "#eee"));
+        };
+
+        auto* button = new QPushButton();
+
+        if (mixed)
+            button->setText(QStringLiteral("mixed"));
+        else
+            paintSwatch(button, object->property(prop.name()).value<QColor>());
 
         QPointer<QObject> obj = object;
         QPointer<QPushButton> btn = button;
 
-        QObject::connect(button, &QPushButton::clicked, this, [this, obj, prop, btn]()
+        QObject::connect(button, &QPushButton::clicked, this, [this, obj, prop, btn, paintSwatch]()
         {
             if (!obj || !btn)
                 return;
 
             suppressRebuild = true;
-            QColor c = QColorDialog::getColor(obj->property(prop.name()).value<QColor>());
 
-            if (c.isValid())
+            // ShowAlphaChannel is not optional here: without it the dialog always
+            // returns alpha 255, so opening the picker on any translucent colour and
+            // pressing OK silently flattened it - ModalComponent's rgba(0,0,0,140)
+            // overlay, PanelComponent's rgba(50,50,55,200), Minimap, RadialMenu,
+            // DragSlot.
+            QColor c = QColorDialog::getColor(obj->property(prop.name()).value<QColor>(),
+                                              this,
+                                              QString(),
+                                              QColorDialog::ShowAlphaChannel);
+
+            if (c.isValid() && obj)
             {
                 ApplyPropertyChange(obj, prop.name(),c);
 
                 if (btn)
-                    btn->setText(c.name(QColor::HexArgb));
+                    paintSwatch(btn, c);
             }
 
             suppressRebuild = false;
@@ -912,6 +1025,24 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
 void PropertyEditorPanel::Rebuild()
 {
     pendingRebuild = false;
+    rebuildQueued  = false;
+
+    // Every rebuild re-creates the whole widget tree, which resets the scroll bar
+    // to the top - so toggling a checkbox near the bottom of a Button's property
+    // list used to throw you back to the top. Restore deferred, because the new
+    // layout has no geometry until the event loop has run.
+    const int scrollY = scrollArea && scrollArea->verticalScrollBar()
+                      ? scrollArea->verticalScrollBar()->value()
+                      : 0;
+
+    if (scrollY > 0)
+    {
+        QTimer::singleShot(0, this, [this, scrollY]()
+        {
+            if (scrollArea && scrollArea->verticalScrollBar())
+                scrollArea->verticalScrollBar()->setValue(scrollY);
+        });
+    }
 
     QLayoutItem* child;
 
