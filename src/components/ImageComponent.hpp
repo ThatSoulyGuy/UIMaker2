@@ -4,6 +4,7 @@
 #include <QString>
 #include <QColor>
 #include <QPixmap>
+#include <QSize>
 #include <QDateTime>
 
 #include "core/Component.hpp"
@@ -46,6 +47,10 @@ public:
     bool IsPixelated() const noexcept;
 
     void SetPixelated(bool v);
+
+    // Native pixel resolution of the loaded texture (a null size if none is
+    // loaded). Used by the pixel-unit "calibrate to resolution" flow.
+    QSize GetTextureSize() const;
 
     void ToJson(QJsonObject& out) const override;
 

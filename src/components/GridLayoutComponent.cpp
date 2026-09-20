@@ -1,6 +1,7 @@
 #include "components/GridLayoutComponent.hpp"
 #include "scene/SceneElementItem.hpp"
 #include "core/UiElement.hpp"
+#include "core/PixelModel.hpp"
 
 #include <QJsonObject>
 
@@ -79,7 +80,7 @@ void GridLayoutComponent::Update(SceneElementItem& item, QRectF& rect, const QRe
         for (int r = 0; r < row; ++r)
             y += rowHeights[r] + m_spacingV;
 
-        children[i]->setPosFromComponent(QPointF(x, y));
+        children[i]->setPosFromComponent(PixelModel::SnapPoint(QPointF(x, y)));
     }
 
     // Compute total size
@@ -93,7 +94,7 @@ void GridLayoutComponent::Update(SceneElementItem& item, QRectF& rect, const QRe
         totalH += h;
     totalH += m_spacingV * std::max(0, rows - 1) + 2 * m_padding;
 
-    rect.setSize(QSizeF(totalW, totalH));
+    rect.setSize(QSizeF(PixelModel::SnapValue(totalW), PixelModel::SnapValue(totalH)));
 }
 
 bool GridLayoutComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)

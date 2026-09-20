@@ -4,6 +4,7 @@
 #include "scene/SceneElementItem.hpp"
 #include "core/UiElement.hpp"
 #include "core/GridSnap.hpp"
+#include "core/PixelModel.hpp"
 #include "components/TransformComponent.hpp"
 
 #include <cmath>
@@ -165,7 +166,14 @@ InputResult TransformInputHandler::HandleRelease(const MouseReleaseEvent& event,
         d.afterRotation   = s.xform->GetRotationDegrees();
         d.afterScale      = s.xform->GetScale();
 
-        if (d.beforePos == d.afterPos
+        // In PixelGrid mode the on-screen position is the rounded one, so a
+        // sub-unit drag that rounds back to the same cell is not a visible edit
+        // and must not push a phantom undo step. Compare the snapped positions.
+        const bool posSame = PixelModel::PixelSnap()
+            ? (PixelModel::SnapPoint(d.beforePos) == PixelModel::SnapPoint(d.afterPos))
+            : (d.beforePos == d.afterPos);
+
+        if (posSame
             && d.beforeRotation == d.afterRotation
             && d.beforeScale == d.afterScale)
         {

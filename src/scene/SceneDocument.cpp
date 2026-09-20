@@ -22,6 +22,7 @@
 #include "core/AssetContext.hpp"
 #include "core/Component.hpp"
 #include "core/UiElement.hpp"
+#include "core/PixelModel.hpp"
 #include "scene/SceneElementItem.hpp"
 
 #include "components/TransformComponent.hpp"
@@ -469,9 +470,42 @@ QByteArray SceneDocument::ExportJson() const
     QJsonObject rootObj;
 
     root->ToJson(rootObj);
+
+    // Document-level metadata alongside the root element's fields. The engine
+    // needs the rendering model to reproduce the editor's layout rounding.
+    rootObj["renderModel"] = (PixelModel::GetMode() == PixelModel::Mode::PixelGrid) ? "pixel" : "continuous";
+    rootObj["pixelUnit"] = PixelModel::GetUnit();
+
     QJsonDocument doc(rootObj);
 
     return doc.toJson(QJsonDocument::Indented);
+}
+
+void SceneDocument::RelayoutAll()
+{
+    // Re-run every element's layout so geometry re-rounds under the current
+    // PixelModel. This MUST be bottom-up (post-order): a layout container sizes
+    // itself from its children, so the children have to be re-rounded before a
+    // parent reads their sizes. A flat, unordered pass over the items map would
+    // compute a parent from pre-rounding child sizes and leave nested layout
+    // geometry off by a unit (and nondeterministically, since the map is keyed
+    // by pointer address).
+    std::function<void(UiElement*)> visit = [&](UiElement* e)
+    {
+        if (!e)
+            return;
+
+        for (QObject* c : e->children())
+        {
+            if (auto* child = qobject_cast<UiElement*>(c))
+                visit(child);
+        }
+
+        if (SceneElementItem* item = items.value(e, nullptr))
+            item->RefreshFromComponents();
+    };
+
+    visit(root);
 }
 
 bool SceneDocument::LoadJson(const QByteArray& data)
@@ -497,6 +531,17 @@ bool SceneDocument::LoadJson(const QByteArray& data)
     root = new UiElement("Root");
 
     QJsonObject rootObj = doc.object();
+
+    // Restore the document's rendering model before rebuilding the tree, so the
+    // elements' first layout pass already rounds (or not) correctly.
+    PixelModel::SetMode(rootObj["renderModel"].toString("continuous") == QLatin1String("pixel")
+                        ? PixelModel::Mode::PixelGrid : PixelModel::Mode::Continuous);
+    // Reset to the default for a missing OR invalid (<=0) stored unit, so a
+    // malformed value can't silently leak the previously loaded document's unit
+    // (SetUnit ignores <=0, which would otherwise keep the stale global).
+    const double loadedUnit = rootObj["pixelUnit"].toDouble(1.0);
+    PixelModel::SetUnit(loadedUnit > 0.0 ? loadedUnit : 1.0);
+
     root->SetName(rootObj["name"].toString("Root"));
     root->SetId(QUuid::fromString(rootObj["id"].toString()));
 

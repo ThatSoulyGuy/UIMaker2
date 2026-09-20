@@ -16,9 +16,19 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QInputDialog>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QVBoxLayout>
+#include <QLabel>
+#include <QDoubleSpinBox>
+#include <QPushButton>
+#include <QStatusBar>
+#include <cmath>
 #include <QItemSelection>
 #include <QSignalBlocker>
+#include "components/ImageComponent.hpp"
 #include "core/GridSnap.hpp"
+#include "core/PixelModel.hpp"
 #include "core/UiElement.hpp"
 #include "core/Component.hpp"
 #include "components/TransformComponent.hpp"
@@ -418,6 +428,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::UIMake
 
     // Connect transform signals to undo stack
     connect(m_viewport, &ViewportWidget::TransformCompleted, this, &MainWindow::onTransformCompleted);
+    connect(m_viewport, &ViewportWidget::ElementPicked, this, &MainWindow::OnCalibrationPick);
 
     AttachScene(document->GetScene());
 
@@ -488,6 +499,10 @@ bool MainWindow::OpenSceneFile(const QString& path)
     hierarchyView->setSelectionModel(hierarchySelection);
     WireHierarchySignals();
     propertyPanel->SetTarget(document->GetRoot());
+
+    // LoadJson restored the rendering model; reflect it in the menu and viewport.
+    SyncRenderModelChecks();
+    m_viewport->UpdateRenderMode();
 
     return true;
 }
@@ -740,6 +755,163 @@ void MainWindow::BuildViewMenu()
     });
 
     SyncSnapChecks();
+
+    // ----- Rendering model (document property, not a QSettings preference) -----
+    QMenu* renderMenu = viewMenu->addMenu("Rendering Model");
+
+    m_renderGroup = new QActionGroup(this);
+    m_renderGroup->setExclusive(true);
+
+    auto applyModel = [this]()
+    {
+        if (document)
+            document->RelayoutAll();
+        if (m_viewport)
+            m_viewport->UpdateRenderMode();
+        SyncRenderModelChecks();
+    };
+
+    m_renderContinuousAction = renderMenu->addAction("Continuous (high-fidelity)");
+    m_renderContinuousAction->setCheckable(true);
+    m_renderGroup->addAction(m_renderContinuousAction);
+    connect(m_renderContinuousAction, &QAction::triggered, this, [this, applyModel]()
+    {
+        PixelModel::SetMode(PixelModel::Mode::Continuous);
+        applyModel();
+    });
+
+    m_renderPixelAction = renderMenu->addAction("Pixel Grid (pixel-perfect)");
+    m_renderPixelAction->setCheckable(true);
+    m_renderGroup->addAction(m_renderPixelAction);
+    connect(m_renderPixelAction, &QAction::triggered, this, [this, applyModel]()
+    {
+        PixelModel::SetMode(PixelModel::Mode::PixelGrid);
+        applyModel();
+    });
+
+    renderMenu->addSeparator();
+
+    m_pixelUnitAction = renderMenu->addAction("Pixel Unit...");
+    connect(m_pixelUnitAction, &QAction::triggered, this, [this, applyModel]()
+    {
+        QDialog dlg(this);
+        dlg.setWindowTitle("Pixel Unit");
+
+        auto* lay = new QVBoxLayout(&dlg);
+        lay->addWidget(new QLabel("Scene units per virtual pixel (square):", &dlg));
+
+        auto* spin = new QDoubleSpinBox(&dlg);
+        spin->setRange(0.01, 4096.0);
+        spin->setDecimals(3);
+        spin->setValue(PixelModel::GetUnit());
+        lay->addWidget(spin);
+
+        auto* calibrateBtn = new QPushButton("Calibrate to resolution...", &dlg);
+        calibrateBtn->setToolTip("Then click a square image element; its texture resolution sets the unit.");
+        lay->addWidget(calibrateBtn);
+
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        lay->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+        bool calibrate = false;
+        connect(calibrateBtn, &QPushButton::clicked, &dlg, [&dlg, &calibrate]()
+        {
+            calibrate = true;
+            dlg.reject();   // close, then enter pick mode below
+        });
+
+        if (dlg.exec() == QDialog::Accepted)
+        {
+            PixelModel::SetUnit(spin->value());
+            applyModel();
+        }
+        else if (calibrate && m_viewport)
+        {
+            // Persistent hint (cleared by OnCalibrationPick on click/cancel);
+            // the crosshair cursor is the other armed indicator. Esc cancels.
+            statusBar()->showMessage("Calibrate: click a square image element (Esc to cancel)...");
+            m_viewport->BeginElementPick();
+        }
+    });
+
+    SyncRenderModelChecks();
+}
+
+void MainWindow::OnCalibrationPick(UiElement* element)
+{
+    statusBar()->clearMessage();
+
+    if (!element)
+        return;   // clicked empty space, or the pick was cancelled
+
+    auto* img = element->GetComponent<ImageComponent>();
+    if (!img)
+    {
+        QMessageBox::warning(this, "Calibrate", "That element has no Image component. Pick an image element.");
+        return;
+    }
+
+    const QSize tex = img->GetTextureSize();
+    if (tex.isEmpty() || tex.width() <= 0)
+    {
+        QMessageBox::warning(this, "Calibrate", "That image element has no loaded texture to calibrate from.");
+        return;
+    }
+
+    // The texture must also be square: a single square virtual-pixel unit is
+    // only well-defined when one texel is square. (A square element showing a
+    // non-square texture would otherwise calibrate correctly on one axis only.)
+    if (tex.width() != tex.height())
+    {
+        QMessageBox::warning(this, "Calibrate",
+            QString("The texture must be square for a single pixel unit.\nThis one is %1 x %2 px.")
+                .arg(tex.width()).arg(tex.height()));
+        return;
+    }
+
+    SceneElementItem* item = document ? document->GetItem(element) : nullptr;
+    if (!item)
+        return;
+
+    const QSizeF sz = item->boundingRect().size();
+    if (std::abs(sz.width() - sz.height()) > 0.01)
+    {
+        QMessageBox::warning(this, "Calibrate",
+            QString("The image element must be square (width == height).\nThis one is %1 x %2 scene units.")
+                .arg(sz.width()).arg(sz.height()));
+        return;
+    }
+
+    // One virtual pixel = one texel: scene-units-per-texel = elementSize / textureResolution.
+    const double unit = sz.width() / static_cast<double>(tex.width());
+    if (unit <= 0.0)
+        return;
+
+    PixelModel::SetUnit(unit);
+    document->RelayoutAll();
+    m_viewport->UpdateRenderMode();
+    SyncRenderModelChecks();
+
+    QMessageBox::information(this, "Calibrate",
+        QString("Calibrated: 1 virtual pixel = %1 scene units\n(%2 px texture shown at %3 scene units).")
+            .arg(unit).arg(tex.width()).arg(sz.width()));
+}
+
+void MainWindow::SyncRenderModelChecks()
+{
+    const bool pixel = PixelModel::GetMode() == PixelModel::Mode::PixelGrid;
+
+    if (m_renderPixelAction)
+        m_renderPixelAction->setChecked(pixel);
+    if (m_renderContinuousAction)
+        m_renderContinuousAction->setChecked(!pixel);
+    if (m_pixelUnitAction)
+    {
+        m_pixelUnitAction->setText(QString("Pixel Unit: %1...").arg(PixelModel::GetUnit()));
+        m_pixelUnitAction->setEnabled(pixel);
+    }
 }
 
 void MainWindow::SaveSnapSettings()
@@ -829,6 +1001,12 @@ void MainWindow::ConnectActions()
         document = new SceneDocument(this);
         // Fresh scene has no project root yet; clear any stale resolution base.
         document->SetBaseDir(QString());
+
+        // A new document starts in the default (Continuous) rendering model.
+        PixelModel::SetMode(PixelModel::Mode::Continuous);
+        PixelModel::SetUnit(1.0);
+        SyncRenderModelChecks();
+        m_viewport->UpdateRenderMode();
 
         m_viewport->SetDocument(document);
         AttachScene(document->GetScene());

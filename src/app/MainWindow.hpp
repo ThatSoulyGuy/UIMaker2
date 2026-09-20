@@ -49,6 +49,14 @@ private:
     // QSettings, and set the checkmark on whichever menu item matches it.
     void SaveSnapSettings();
     void SyncSnapChecks();
+
+    // Rendering-model menu: set the checkmarks and unit label from the current
+    // PixelModel (a document property, so it is not persisted to QSettings).
+    void SyncRenderModelChecks();
+
+    // Finish a "calibrate to resolution" pick: derive the pixel unit from the
+    // clicked square image element's scene size / texture resolution.
+    void OnCalibrationPick(UiElement* element);
     void WireHierarchySignals();
     void AttachScene(QGraphicsScene* scene);
     void FinishAddElement(UiElement* e, const QString& name);
@@ -87,6 +95,11 @@ private:
     QActionGroup* m_snapGroup = nullptr;
     QList<QAction*> m_snapPresetActions;
     QAction* m_snapCustomAction = nullptr;
+
+    QActionGroup* m_renderGroup = nullptr;
+    QAction* m_renderContinuousAction = nullptr;
+    QAction* m_renderPixelAction = nullptr;
+    QAction* m_pixelUnitAction = nullptr;
 
     QMetaObject::Connection sceneSelectionConnection;
 

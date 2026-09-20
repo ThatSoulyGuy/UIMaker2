@@ -1,6 +1,7 @@
 #include "components/StackLayoutComponent.hpp"
 #include "scene/SceneElementItem.hpp"
 #include "core/UiElement.hpp"
+#include "core/PixelModel.hpp"
 
 #include <QJsonObject>
 
@@ -44,13 +45,13 @@ void StackLayoutComponent::Update(SceneElementItem& item, QRectF& rect, const QR
 
         if (m_direction == Vertical)
         {
-            childItem->setPosFromComponent(QPointF(m_padding, offset));
+            childItem->setPosFromComponent(PixelModel::SnapPoint(QPointF(m_padding, offset)));
             offset += childRect.height() + m_spacing;
             maxCross = std::max(maxCross, childRect.width());
         }
         else
         {
-            childItem->setPosFromComponent(QPointF(offset, m_padding));
+            childItem->setPosFromComponent(PixelModel::SnapPoint(QPointF(offset, m_padding)));
             offset += childRect.width() + m_spacing;
             maxCross = std::max(maxCross, childRect.height());
         }
@@ -62,9 +63,9 @@ void StackLayoutComponent::Update(SceneElementItem& item, QRectF& rect, const QR
     offset += m_padding;
 
     if (m_direction == Vertical)
-        rect.setSize(QSizeF(maxCross + 2 * m_padding, offset));
+        rect.setSize(QSizeF(PixelModel::SnapValue(maxCross + 2 * m_padding), PixelModel::SnapValue(offset)));
     else
-        rect.setSize(QSizeF(offset, maxCross + 2 * m_padding));
+        rect.setSize(QSizeF(PixelModel::SnapValue(offset), PixelModel::SnapValue(maxCross + 2 * m_padding)));
 }
 
 bool StackLayoutComponent::Paint(QPainter* painter, const QRectF& rect, bool selected)

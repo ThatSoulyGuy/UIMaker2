@@ -71,6 +71,10 @@ public:
     QByteArray ExportJson() const;
     bool LoadJson(const QByteArray& data);
 
+    // Re-run every element's layout so geometry re-rounds under the current
+    // PixelModel. Called when the rendering model or its unit changes.
+    void RelayoutAll();
+
     QList<UiElement*> GetSelectedElements() const;
     UiElement* GetPrimarySelection() const;
 

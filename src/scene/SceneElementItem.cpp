@@ -6,6 +6,7 @@
 #include <algorithm>
 #include "core/UiElement.hpp"
 #include "core/Component.hpp"
+#include "core/PixelModel.hpp"
 #include "components/TransformComponent.hpp"
 
 #ifndef M_PI
@@ -31,7 +32,12 @@ static QPointF AnchorAdjustedItemPos(const QPointF& pos, AnchorFlags anchors, co
     else if (anchors.testFlag(Anchor::CENTER_Y))
         y = (parentRect.height() - h) * 0.5 + pos.y();
 
-    return parentRect.topLeft() + QPointF(x, y);
+    // In PixelGrid mode, snap the resolved position to the virtual-pixel grid.
+    // This is where centring/anchoring produces fractional coordinates; snapping
+    // here makes anchored and centred elements land on whole pixels (identity in
+    // Continuous mode). The inverse stays exact - snapping only the forward
+    // direction is idempotent, so it converges rather than drifting.
+    return PixelModel::SnapPoint(parentRect.topLeft() + QPointF(x, y));
 }
 
 static QPointF InverseAnchorComponentPos(const QPointF& itemPos, AnchorFlags anchors, const QRectF& parentRect, double w, double h)

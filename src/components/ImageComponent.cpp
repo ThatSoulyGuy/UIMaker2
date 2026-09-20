@@ -128,6 +128,11 @@ bool ImageComponent::IsPixelated() const noexcept
     return pixelated;
 }
 
+QSize ImageComponent::GetTextureSize() const
+{
+    return pixmap.size();
+}
+
 void ImageComponent::SetPixelated(bool v)
 {
     if (pixelated == v)

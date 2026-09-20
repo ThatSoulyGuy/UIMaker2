@@ -18,14 +18,16 @@
 #include "input/InputHandler.hpp"
 #include "input/InputEvents.hpp"
 #include "scene/SceneDocument.hpp"
+#include "scene/SceneElementItem.hpp"
 #include "core/GridSnap.hpp"
+#include "core/PixelModel.hpp"
 
 ViewportWidget::ViewportWidget(QWidget* parent)
     : QGraphicsView(parent)
     , m_toolManager(new ToolManager(this))
     , m_renderPipeline(new RenderPipeline(this))
 {
-    setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
+    UpdateRenderMode();
     setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
     setResizeAnchor(QGraphicsView::AnchorViewCenter);
     setDragMode(QGraphicsView::RubberBandDrag);
@@ -45,6 +47,13 @@ ViewportWidget::ViewportWidget(QWidget* parent)
 
 void ViewportWidget::SetDocument(SceneDocument* document)
 {
+    // Cancel any armed calibration pick - its target document is going away.
+    if (m_pickMode)
+    {
+        m_pickMode = false;
+        unsetCursor();
+    }
+
     m_document = document;
 
     if (m_document)
@@ -73,6 +82,19 @@ void ViewportWidget::FitToItem(QGraphicsItem* item)
 
     const QRectF r = item->sceneBoundingRect().adjusted(-20.0, -20.0, 20.0, 20.0);
     fitInView(r, Qt::KeepAspectRatio);
+}
+
+void ViewportWidget::UpdateRenderMode()
+{
+    QPainter::RenderHints hints = QPainter::Antialiasing | QPainter::TextAntialiasing;
+
+    // Continuous mode smooths scaled pixmaps; PixelGrid keeps them crisp so the
+    // editor previews pixel-art the way the target engine will render it.
+    if (PixelModel::GetMode() == PixelModel::Mode::Continuous)
+        hints |= QPainter::SmoothPixmapTransform;
+
+    setRenderHints(hints);
+    viewport()->update();
 }
 
 void ViewportWidget::FitToScene()
@@ -187,8 +209,30 @@ void ViewportWidget::paintEvent(QPaintEvent* event)
     }
 }
 
+void ViewportWidget::BeginElementPick()
+{
+    m_pickMode = true;
+    setCursor(Qt::CrossCursor);
+}
+
 void ViewportWidget::mousePressEvent(QMouseEvent* event)
 {
+    if (m_pickMode)
+    {
+        m_pickMode = false;
+        unsetCursor();
+
+        UiElement* picked = nullptr;
+        if (event->button() == Qt::LeftButton)
+        {
+            if (auto* sei = dynamic_cast<SceneElementItem*>(itemAt(event->pos())))
+                picked = sei->GetElement();
+        }
+
+        emit ElementPicked(picked);
+        return;
+    }
+
     if (m_document)
     {
         MousePressEvent e;
@@ -220,6 +264,9 @@ void ViewportWidget::mousePressEvent(QMouseEvent* event)
 
 void ViewportWidget::mouseMoveEvent(QMouseEvent* event)
 {
+    if (m_pickMode)
+        return;   // keep the crosshair; wait for the pick click
+
     if (m_document)
     {
         MouseMoveEvent e;
@@ -255,6 +302,9 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent* event)
 
 void ViewportWidget::mouseReleaseEvent(QMouseEvent* event)
 {
+    if (m_pickMode)
+        return;
+
     if (m_document)
     {
         MouseReleaseEvent e;
@@ -348,6 +398,19 @@ void ViewportWidget::wheelEvent(QWheelEvent* event)
 
 void ViewportWidget::keyPressEvent(QKeyEvent* event)
 {
+    if (m_pickMode)
+    {
+        // Escape cancels a calibration pick; swallow other keys so shortcuts
+        // don't fire while armed.
+        if (event->key() == Qt::Key_Escape)
+        {
+            m_pickMode = false;
+            unsetCursor();
+            emit ElementPicked(nullptr);
+        }
+        return;
+    }
+
     if (event->key() == Qt::Key_F && scene())
     {
         auto selected = scene()->selectedItems();

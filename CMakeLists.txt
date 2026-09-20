@@ -31,6 +31,8 @@ qt_add_executable(UIMaker2
     src/core/AssetContext.cpp
     src/core/GridSnap.hpp
     src/core/GridSnap.cpp
+    src/core/PixelModel.hpp
+    src/core/PixelModel.cpp
 
     # Components
     src/components/TransformComponent.hpp
