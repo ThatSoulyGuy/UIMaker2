@@ -23,6 +23,7 @@
 #include <QDoubleSpinBox>
 #include <QPushButton>
 #include <QStatusBar>
+#include <QCloseEvent>
 #include <cmath>
 #include <QItemSelection>
 #include <QSignalBlocker>
@@ -438,6 +439,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::UIMake
     BuildViewMenu();
     ConnectActions();
 
+    // The undo stack is the dirty flag: clean == everything is on disk. Qt
+    // substitutes the "[*]" in the title from setWindowModified.
+    connect(undoStack, &QUndoStack::cleanChanged, this, [this](bool clean)
+    {
+        setWindowModified(!clean);
+    });
+
+    UpdateTitle();
+
     // Hold the property panel still for the duration of a gizmo gesture. The
     // transform handler writes TransformComponent once per mouse-move and each
     // write posts a queued ComponentChanged, so the panel used to tear down and
@@ -533,7 +543,129 @@ bool MainWindow::OpenSceneFile(const QString& path)
     SyncRenderModelChecks();
     m_viewport->UpdateRenderMode();
 
+    // A freshly loaded document is by definition unmodified.
+    currentPath = path;
+    undoStack->setClean();
+    UpdateTitle();
+
     return true;
+}
+
+void MainWindow::UpdateTitle()
+{
+    // The "[*]" is a placeholder Qt substitutes based on setWindowModified,
+    // so the dirty marker tracks the undo stack without rebuilding the string.
+    QString shown = QStringLiteral("Untitled");
+
+    if (!currentPath.isEmpty())
+    {
+        const QFileInfo info(currentPath);
+
+        // Every project's file is literally "scene.json", so that name alone
+        // identifies nothing. Name the containing folder instead - that is what
+        // the user thinks of as the project.
+        shown = info.fileName() == QStringLiteral("scene.json")
+              ? info.absoluteDir().dirName()
+              : info.fileName();
+
+        if (shown.isEmpty())
+            shown = info.fileName();
+    }
+
+    setWindowTitle(QStringLiteral("%1[*] - UIMaker2").arg(shown));
+    setWindowFilePath(currentPath);
+}
+
+bool MainWindow::SaveScene()
+{
+    // Without a known project root there is nothing to overwrite; fall back to
+    // the Export flow, which picks a folder and adopts it as the root.
+    const QString baseDir = document ? document->GetBaseDir() : QString();
+
+    if (baseDir.isEmpty())
+    {
+        ui->ActionExport->trigger();
+        return undoStack->isClean();
+    }
+
+    if (!SceneExporter::ExportToFolder(document, baseDir))
+    {
+        QMessageBox::warning(this, "Save Failed",
+                             QString("Could not write the scene to:\n%1").arg(baseDir));
+        return false;
+    }
+
+    currentPath = QDir(baseDir).filePath(QStringLiteral("scene.json"));
+
+    QSettings settings;
+    settings.setValue(QStringLiteral("io/lastDir"), baseDir);
+    settings.setValue(QStringLiteral("io/lastFile"), currentPath);
+
+    // Clean == saved. cleanChanged drives the title's modified marker.
+    undoStack->setClean();
+    UpdateTitle();
+
+    statusBar()->showMessage(QStringLiteral("Saved %1").arg(currentPath), 3000);
+
+    return true;
+}
+
+bool MainWindow::ConfirmDiscardChanges()
+{
+    if (!undoStack || undoStack->isClean())
+        return true;
+
+    const auto choice = QMessageBox::warning(
+        this,
+        QStringLiteral("Unsaved Changes"),
+        currentPath.isEmpty()
+            ? QStringLiteral("This scene has never been saved.\nSave it first?")
+            : QStringLiteral("%1 has unsaved changes.\nSave first?")
+                  .arg(QFileInfo(currentPath).fileName()),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+        QMessageBox::Save);
+
+    if (choice == QMessageBox::Cancel)
+        return false;
+
+    if (choice == QMessageBox::Save)
+        return SaveScene();
+
+    return true;   // Discard
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (!undoStack || undoStack->isClean())
+    {
+        event->accept();
+        return;
+    }
+
+    const auto choice = QMessageBox::warning(
+        this,
+        QStringLiteral("Unsaved Changes"),
+        currentPath.isEmpty()
+            ? QStringLiteral("This scene has never been saved.\nSave it before closing?")
+            : QStringLiteral("%1 has unsaved changes.\nSave before closing?")
+                  .arg(QFileInfo(currentPath).fileName()),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+        QMessageBox::Save);
+
+    if (choice == QMessageBox::Cancel)
+    {
+        event->ignore();
+        return;
+    }
+
+    // A failed or cancelled save must not close the window and lose the work.
+    if (choice == QMessageBox::Save && !SaveScene())
+    {
+        event->ignore();
+        return;
+    }
+
+    event->accept();
 }
 
 MainWindow::~MainWindow()
@@ -1029,6 +1161,10 @@ void MainWindow::ConnectActions()
 
     connect(ui->ActionNew, &QAction::triggered, this, [this]()
     {
+        // New destroys the current document just as surely as closing does.
+        if (!ConfirmDiscardChanges())
+            return;
+
         // Undo commands hold raw pointers into the old document; drop them
         // before it goes away or Ctrl+Z would dereference freed memory.
         undoStack->clear();
@@ -1062,7 +1198,18 @@ void MainWindow::ConnectActions()
         hierarchyView->setModel(hierarchyModel); hierarchyView->setSelectionModel(hierarchySelection);
         WireHierarchySignals();
         propertyPanel->SetTarget(document->GetRoot());
+
+        // Forget the previous file, otherwise New + quit silently reopens it on
+        // the next launch (the startup path reads io/lastFile).
+        currentPath.clear();
+        QSettings().remove(QStringLiteral("io/lastFile"));
+
+        undoStack->setClean();
+        UpdateTitle();
     });
+
+    ui->ActionSave->setShortcut(QKeySequence::Save);
+    connect(ui->ActionSave, &QAction::triggered, this, [this]() { SaveScene(); });
 
     connect(ui->ActionExport, &QAction::triggered, this, [this]()
     {
@@ -1078,8 +1225,15 @@ void MainWindow::ConnectActions()
             // The exported folder is now the project root: assets live there
             // and subsequent relative-path edits resolve against it.
             document->SetBaseDir(folder);
+            currentPath = QDir(folder).filePath("scene.json");
             settings.setValue(QStringLiteral("io/lastDir"), folder);
-            settings.setValue(QStringLiteral("io/lastFile"), QDir(folder).filePath("scene.json"));
+            settings.setValue(QStringLiteral("io/lastFile"), currentPath);
+
+            // Exporting IS saving: the document now has a home on disk, so
+            // subsequent Ctrl+S writes here with no dialog.
+            undoStack->setClean();
+            UpdateTitle();
+
             QMessageBox::information(this, "Export", "Scene exported successfully.");
         }
         else
@@ -1106,6 +1260,10 @@ void MainWindow::ConnectActions()
 
     connect(ui->ActionLoad, &QAction::triggered, this, [this]()
     {
+        // Loading replaces the current document; offer to save it first.
+        if (!ConfirmDiscardChanges())
+            return;
+
         QSettings settings;
         QString path = QFileDialog::getOpenFileName(this, "Load Scene JSON",
             settings.value(QStringLiteral("io/lastDir")).toString(), "JSON (*.json)");

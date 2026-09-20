@@ -35,6 +35,7 @@
     </property>
     <addaction name="ActionNew"/>
     <addaction name="ActionLoad"/>
+    <addaction name="ActionSave"/>
     <addaction name="separator"/>
     <addaction name="ActionExport"/>
     <addaction name="ActionBake"/>
@@ -110,6 +111,11 @@
   <action name="ActionNew">
    <property name="text">
     <string>New...</string>
+   </property>
+  </action>
+  <action name="ActionSave">
+   <property name="text">
+    <string>Save</string>
    </property>
   </action>
   <action name="ActionLoad">

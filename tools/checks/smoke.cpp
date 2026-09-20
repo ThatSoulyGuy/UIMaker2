@@ -4,7 +4,15 @@
 #include "scene/UiBinReader.hpp"
 #include "scene/UiBinCommon.hpp"
 #include "scene/SceneExporter.hpp"
+#include "components/TransformComponent.hpp"
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
 #include "scene/SceneExporter.hpp"
+#include "components/TransformComponent.hpp"
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
 #include "core/UiElement.hpp"
 
 #include <QApplication>
@@ -100,6 +108,54 @@ int main(int argc, char** argv)
         QString err;
         check(UiBinReader::Validate(out, &err), "the baked file re-reads cleanly");
         if (!err.isEmpty()) std::fprintf(stderr, "      error: %s\n", qUtf8Printable(err));
+    }
+
+    std::fprintf(stderr, "save-in-place round trip (Ctrl+S writes into the project root)\n");
+    {
+        QTemporaryDir tmp;
+        check(tmp.isValid(), "temp project root created");
+
+        const QString rootDir = tmp.path();
+        const double markerX = 137.5;
+
+        {
+            SceneDocument doc;
+            doc.SetBaseDir(rootDir);
+            UiElement* panel = doc.CreatePanelElement("Panel", nullptr);
+            UiElement* text  = doc.CreateTextElement("Title", panel);
+            text->GetComponent<TransformComponent>()->SetPosition(QPointF(markerX, 42.0));
+
+            check(SceneExporter::ExportToFolder(&doc, rootDir), "first save writes scene.json");
+
+            // Second save into the SAME folder: this is the Ctrl+S path, where
+            // every asset would be copied onto itself.
+            check(SceneExporter::ExportToFolder(&doc, rootDir), "saving again in place succeeds");
+        }
+
+        check(QFile::exists(QDir(rootDir).filePath("scene.json")), "scene.json exists on disk");
+
+        // Reload and confirm the edit survived both writes.
+        SceneDocument reloaded;
+        reloaded.SetBaseDir(rootDir);
+        QFile f(QDir(rootDir).filePath("scene.json"));
+        check(f.open(QIODevice::ReadOnly), "scene.json is readable");
+        check(reloaded.LoadJson(f.readAll()), "scene.json reloads");
+
+        UiElement* found = nullptr;
+        for (QObject* c : reloaded.GetRoot()->children())
+            if (auto* e = qobject_cast<UiElement*>(c))
+                for (QObject* g : e->children())
+                    if (auto* ge = qobject_cast<UiElement*>(g))
+                        if (ge->GetName() == "Title") found = ge;
+
+        check(found != nullptr, "nested Title element survived the round trip");
+        if (found)
+        {
+            const double x = found->GetComponent<TransformComponent>()->GetPosition().x();
+            check(qFuzzyCompare(x, markerX), "its edited position survived both saves");
+            if (!qFuzzyCompare(x, markerX))
+                std::fprintf(stderr, "      expected %.3f, got %.3f\n", markerX, x);
+        }
     }
 
     std::fprintf(stderr, "%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASS",

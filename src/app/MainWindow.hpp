@@ -33,6 +33,12 @@ public:
     MainWindow(QWidget* = nullptr);
     ~MainWindow();
 
+protected:
+
+    // Offers to save when the undo stack is dirty. Until this existed, closing
+    // the window threw away every unsaved edit with no prompt at all.
+    void closeEvent(QCloseEvent* event) override;
+
 private slots:
 
     void onTransformCompleted(const QList<TransformDelta>& deltas, const QString& actionName);
@@ -65,6 +71,19 @@ private:
     // the tree/property/viewport. Returns false (and shows a warning) on a
     // read or parse failure. Shared by File>Load and the reopen-on-startup path.
     bool OpenSceneFile(const QString& path);
+
+    // Write scene.json (plus assets) back to the document's own project root,
+    // with no dialog and no confirmation popup. Falls back to the Export flow
+    // when there is no root yet. Marks the undo stack clean on success.
+    bool SaveScene();
+
+    // Window title tracks the current file and the modified state via the
+    // "[*]" placeholder that QWidget::setWindowModified drives.
+    void UpdateTitle();
+
+    // Save / Discard / Cancel prompt for anything that is about to destroy the
+    // current document (New, Load). Returns false when the caller must abort.
+    bool ConfirmDiscardChanges();
 
     UiElement* CurrentElement() const;
     QList<UiElement*> SelectedElements() const;
@@ -108,6 +127,11 @@ private:
     // autoscrolls in response to the selection model's own signals, so blocking
     // them updates the internal state and never schedules the repaint.
     bool syncingTreeSelection = false;
+
+    // Absolute path of the scene.json backing this document, empty for a
+    // document that has never been saved or loaded. Drives both the window
+    // title and whether Save needs to ask for a location.
+    QString currentPath;
 
     QUndoStack* undoStack = nullptr;
 
