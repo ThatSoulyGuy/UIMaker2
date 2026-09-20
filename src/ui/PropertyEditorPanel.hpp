@@ -51,6 +51,12 @@ public:
     // TransformEnded.
     void SetLive(bool on);
 
+    // The single mutation entry point: writes the property, broadcasts it to
+    // every other selected element's same-kind component, and emits the
+    // (before, after) records MainWindow turns into an undo command. Public so
+    // the hierarchy tree can route renames through the same path.
+    void ApplyPropertyChange(QObject* primary, const QByteArray& propName, const QVariant& value);
+
 signals:
 
     void PropertyEdited();
@@ -68,7 +74,6 @@ private:
 
     void Rebuild();
     QWidget* EditorForProperty(QObject* object, const QMetaProperty& prop, bool mixed = false);
-    void ApplyPropertyChange(QObject* primary, const QByteArray& propName, const QVariant& value);
 
 private slots:
 

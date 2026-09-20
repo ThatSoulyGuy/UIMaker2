@@ -2,6 +2,7 @@
 #include "gizmos/GizmoManager.hpp"
 #include "scene/SceneDocument.hpp"
 #include "scene/SceneElementItem.hpp"
+#include <QGraphicsScene>
 #include "core/UiElement.hpp"
 #include "core/GridSnap.hpp"
 #include "core/PixelModel.hpp"
@@ -26,38 +27,131 @@ InputResult TransformInputHandler::HandlePress(const MousePressEvent& event, Edi
 
     QList<SceneElementItem*> selectedItems = GetTopLevelSelectedItems(ctx);
 
-    if (selectedItems.isEmpty())
-        return InputResult::NotConsumed();
-
-    const bool isGroup = selectedItems.size() > 1;
-    const QRectF sceneBounds = isGroup ? ComputeUnionSceneBounds(selectedItems) : selectedItems.first()->sceneBoundingRect();
-
-    double rotation = 0.0;
-    QPointF scale(1.0, 1.0);
-
-    if (!isGroup)
+    auto boundsOf = [this](const QList<SceneElementItem*>& items)
     {
-        if (auto* xform = GetTransformComponent(selectedItems.first()))
+        return items.size() > 1 ? ComputeUnionSceneBounds(items)
+                                : items.first()->sceneBoundingRect();
+    };
+
+    // A gizmo handle only exists when something is already selected.
+    if (!selectedItems.isEmpty())
+    {
+        const QRectF sceneBounds = boundsOf(selectedItems);
+
+        double rotation = 0.0;
+        QPointF scale(1.0, 1.0);
+
+        if (selectedItems.size() == 1)
         {
-            rotation = xform->GetRotationDegrees();
-            scale = xform->GetScale();
+            if (auto* xform = GetTransformComponent(selectedItems.first()))
+            {
+                rotation = xform->GetRotationDegrees();
+                scale = xform->GetScale();
+            }
+        }
+
+        GizmoHitResult hit = m_gizmoManager->HitTest(event.viewPos, sceneBounds, ctx.view, rotation, scale);
+
+        if (hit.IsHit())
+        {
+            m_startViewPos = event.viewPos;
+            BeginDrag(selectedItems, hit.handleId, event.scenePos, sceneBounds);
+
+            return InputResult::Consumed(hit.cursor, true);
         }
     }
 
-    GizmoHitResult hit = m_gizmoManager->HitTest(event.viewPos, sceneBounds, ctx.view, rotation, scale);
-
-    if (!hit.IsHit())
+    // No handle hit. If the press landed on an element BODY and the Move tool
+    // is active, take the drag ourselves with a synthetic "translate_free"
+    // handle. That id starts with "translate", so it flows through the existing
+    // translate path - both axes free (the locks test for the exact ids
+    // "translate_x"/"translate_y"), grid-snapped by the same block, and named
+    // "Move" by GetUndoActionName - so body drags inherit undo and snapping
+    // with no new transform math.
+    if (m_gizmoManager->GetActiveGizmoId() != QStringLiteral("translate"))
         return InputResult::NotConsumed();
 
-    m_transforming = true;
-    m_activeHandleId = hit.handleId;
+    // Additive selection belongs to QGraphicsView, not to us.
+    if (event.modifiers & (Qt::ControlModifier | Qt::ShiftModifier))
+        return InputResult::NotConsumed();
+
+    SceneElementItem* body = TopmostBodyAt(event.scenePos, ctx);
+
+    // A layout parent owns its children's positions, so dragging one only ever
+    // wrote a value the next relayout discarded.
+    if (!body || HasLayoutParent(body))
+        return InputResult::NotConsumed();
+
+    // Pressing an unselected element selects it and starts the drag in one
+    // gesture, which is what ItemIsMovable used to give us for free.
+    if (!body->isSelected() && ctx.document && body->GetElement())
+    {
+        ctx.document->SetSelected(body->GetElement());
+        selectedItems = GetTopLevelSelectedItems(ctx);
+    }
+
+    if (selectedItems.isEmpty())
+        return InputResult::NotConsumed();
+
     m_startViewPos = event.viewPos;
-    m_startScenePos = event.scenePos;
+    BeginDrag(selectedItems, QStringLiteral("translate_free"), event.scenePos, boundsOf(selectedItems));
+
+    return InputResult::Consumed(Qt::SizeAllCursor, true);
+}
+
+SceneElementItem* TransformInputHandler::TopmostBodyAt(const QPointF& scenePos, EditorContext& ctx)
+{
+    if (!ctx.document || !ctx.document->GetScene())
+        return nullptr;
+
+    // items() is returned in descending stacking order, so the first selectable
+    // hit is the one the user sees on top. Slots are excluded because they are
+    // not selectable and their geometry belongs to their owning container.
+    const QList<QGraphicsItem*> hits = ctx.document->GetScene()->items(scenePos);
+
+    for (QGraphicsItem* gi : hits)
+    {
+        auto* item = dynamic_cast<SceneElementItem*>(gi);
+
+        if (!item || !(item->flags() & QGraphicsItem::ItemIsSelectable))
+            continue;
+
+        return item;
+    }
+
+    return nullptr;
+}
+
+bool TransformInputHandler::HasLayoutParent(SceneElementItem* item)
+{
+    if (!item)
+        return false;
+
+    auto* parentItem = dynamic_cast<SceneElementItem*>(item->parentItem());
+
+    if (!parentItem || !parentItem->GetElement())
+        return false;
+
+    for (Component* c : parentItem->GetElement()->GetComponents())
+    {
+        if (c->IsLayout())
+            return true;
+    }
+
+    return false;
+}
+
+void TransformInputHandler::BeginDrag(const QList<SceneElementItem*>& items, const QString& handleId,
+                                      const QPointF& scenePos, const QRectF& sceneBounds)
+{
+    m_transforming = true;
+    m_activeHandleId = handleId;
+    m_startScenePos = scenePos;
     m_itemCenter = sceneBounds.center();
     m_startRect = sceneBounds;
 
     m_startStates.clear();
-    for (auto* item : selectedItems)
+    for (auto* item : items)
     {
         if (!item)
             continue;
@@ -77,15 +171,12 @@ InputResult TransformInputHandler::HandlePress(const MousePressEvent& event, Edi
         m_startStates.append(s);
     }
 
-    // Per-element start poses are now the undo source of truth; no full-scene
-    // JSON snapshot is taken on press. The delta is built at release time.
-    Q_UNUSED(ctx);
-
-    m_gizmoManager->SetActiveHandle(m_activeHandleId);
+    // Per-element start poses are the undo source of truth; no full-scene JSON
+    // snapshot is taken on press. The delta is built at release time.
+    if (m_gizmoManager)
+        m_gizmoManager->SetActiveHandle(m_activeHandleId);
 
     emit TransformStarted();
-
-    return InputResult::Consumed(hit.cursor, true);
 }
 
 InputResult TransformInputHandler::HandleMove(const MouseMoveEvent& event, EditorContext& ctx)

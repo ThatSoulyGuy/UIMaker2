@@ -47,6 +47,21 @@ private:
     SceneElementItem* GetSelectedItem(EditorContext& ctx) const;
     TransformComponent* GetTransformComponent(SceneElementItem* item) const;
 
+    // Arm a drag: snapshot every item's start pose and take ownership of the
+    // gesture. Shared by the gizmo-handle path and the body-drag path, which
+    // differ only in how the handle id is chosen.
+    void BeginDrag(const QList<SceneElementItem*>& items, const QString& handleId,
+                   const QPointF& scenePos, const QRectF& sceneBounds);
+
+    // The topmost selectable element under this scene position, or null when
+    // the press landed on empty canvas (where QGraphicsView still does
+    // rubber-band selection).
+    static SceneElementItem* TopmostBodyAt(const QPointF& scenePos, EditorContext& ctx);
+
+    // Whether this item's position is owned by a layout parent. Dragging such
+    // a child wrote a position the layout overwrote a frame later.
+    static bool HasLayoutParent(SceneElementItem* item);
+
     void ApplyTransform(const QPointF& scenePos, const QPointF& sceneDelta, EditorContext& ctx);
     void ApplyScale(const ItemStartState& state, const QPointF& scenePos, const QPointF& sceneDelta, EditorContext& ctx);
 

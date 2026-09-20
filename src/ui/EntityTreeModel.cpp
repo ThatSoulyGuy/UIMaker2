@@ -149,7 +149,14 @@ bool EntityTreeModel::setData(const QModelIndex& index, const QVariant& value, i
 
     UiElement* e = static_cast<UiElement*>(index.internalPointer());
 
-    e->SetName(newName);
+    if (!e || e->GetName() == newName)
+        return false;
+
+    // The model does not mutate the document here. MainWindow owns the undo
+    // stack, so it routes the rename through PropertyEditorPanel's
+    // ApplyPropertyChange and the edit lands on the stack like any other
+    // property change. The row refreshes via UiElement::NameChanged.
+    emit RenameRequested(e, newName);
 
     return true;
 }

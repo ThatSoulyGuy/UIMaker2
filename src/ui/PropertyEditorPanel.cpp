@@ -1188,7 +1188,11 @@ void PropertyEditorPanel::Rebuild()
             return;
         }
 
-        target->SetName(v);
+        // Route through ApplyPropertyChange rather than calling SetName
+        // directly, so the rename produces a PropertyEditRecord with an empty
+        // componentKind - the element-level case PropertyEditCommand::Apply
+        // already handles - and lands on the undo stack like every other edit.
+        ApplyPropertyChange(target, "name", v);
     });
 
     QObject::connect(target, &UiElement::NameChanged, nameEdit, [nameEdit](const QString& v)

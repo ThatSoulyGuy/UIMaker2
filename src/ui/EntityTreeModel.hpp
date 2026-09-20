@@ -41,6 +41,11 @@ signals:
 
     void HierarchyChanged();
 
+    // Emitted instead of renaming directly, so the edit can be routed through
+    // the undo stack. setData validates (non-empty, actually different) before
+    // emitting; the row updates from UiElement::NameChanged once applied.
+    void RenameRequested(UiElement* element, const QString& newName);
+
     // Emitted after a successful drag-drop reparent so MainWindow can record
     // an undo command. Rows are FINAL indices among the parent's child
     // elements (the index space UiElement::ReparentTo uses); a null parent id

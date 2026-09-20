@@ -61,7 +61,12 @@ SceneElementItem::SceneElementItem(UiElement* element) : QGraphicsObject(nullptr
 {
     const bool isSlot = element && element->IsSlot();
 
-    setFlag(QGraphicsItem::ItemIsMovable, !isSlot);
+    // NOT movable. QGraphicsView's own item dragging writes straight into
+    // TransformComponent via itemChange, which produces no TransformDelta - so
+    // a body drag was neither undoable nor grid-snapped, and the Rotate and
+    // Scale tools still moved elements. TransformInputHandler now owns body
+    // drags too, routing them through the same translate path as the gizmo.
+    setFlag(QGraphicsItem::ItemIsMovable, false);
     setFlag(QGraphicsItem::ItemIsSelectable, !isSlot);
     setFlag(QGraphicsItem::ItemSendsGeometryChanges, true);
 

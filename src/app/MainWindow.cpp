@@ -1529,6 +1529,17 @@ void MainWindow::WireHierarchySignals()
         hierarchyView->expandAll();
     });
 
+    // The tree asks rather than renames, so the edit goes through the same
+    // path as every other property change and becomes undoable. Typing a name
+    // one character at a time still collapses into a single undo step, because
+    // PropertyEditCommand::mergeWith keys on elementId + kind + propName.
+    connect(hierarchyModel, &EntityTreeModel::RenameRequested, this,
+        [this](UiElement* element, const QString& newName)
+    {
+        if (element && propertyPanel)
+            propertyPanel->ApplyPropertyChange(element, "name", newName);
+    });
+
     // The model has already performed the reparent; the command's first
     // redo() is a no-op.
     connect(hierarchyModel, &EntityTreeModel::ElementReparented, this,

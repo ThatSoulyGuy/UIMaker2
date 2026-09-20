@@ -5,11 +5,31 @@
 #include "scene/UiBinCommon.hpp"
 #include "scene/SceneExporter.hpp"
 #include "components/TransformComponent.hpp"
+#include "ui/PropertyEditorPanel.hpp"
+#include "ui/EntityTreeModel.hpp"
+#include "input/TransformInputHandler.hpp"
+#include "input/EditorContext.hpp"
+#include "input/InputEvents.hpp"
+#include "gizmos/GizmoManager.hpp"
+#include "scene/SceneElementItem.hpp"
+#include "core/GridSnap.hpp"
+#include <QGraphicsView>
+#include <QSignalSpy>
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
 #include "scene/SceneExporter.hpp"
 #include "components/TransformComponent.hpp"
+#include "ui/PropertyEditorPanel.hpp"
+#include "ui/EntityTreeModel.hpp"
+#include "input/TransformInputHandler.hpp"
+#include "input/EditorContext.hpp"
+#include "input/InputEvents.hpp"
+#include "gizmos/GizmoManager.hpp"
+#include "scene/SceneElementItem.hpp"
+#include "core/GridSnap.hpp"
+#include <QGraphicsView>
+#include <QSignalSpy>
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
@@ -156,6 +176,138 @@ int main(int argc, char** argv)
             if (!qFuzzyCompare(x, markerX))
                 std::fprintf(stderr, "      expected %.3f, got %.3f\n", markerX, x);
         }
+    }
+
+    std::fprintf(stderr, "body drags are owned by the tool system (stage 6)\n");
+    {
+        GridSnap::SetEnabled(false);
+
+        SceneDocument doc;
+        UiElement* panel = doc.CreatePanelElement("Panel", nullptr);
+        auto* xf = panel->GetComponent<TransformComponent>();
+        xf->SetScale(QPointF(500.0, 400.0));
+        xf->SetPosition(QPointF(400.0, 300.0));
+        qApp->processEvents();
+
+        QGraphicsView view(doc.GetScene());
+        view.resize(1200, 800);
+        view.centerOn(doc.GetCanvasRect().center());
+
+        SceneElementItem* item = doc.GetItem(panel);
+        check(item != nullptr, "panel has a scene item");
+        check(!(item->flags() & QGraphicsItem::ItemIsMovable),
+              "ItemIsMovable is cleared, so QGraphicsView no longer moves it");
+
+        GizmoManager gm;
+        gm.SetActiveGizmoId("translate");
+        TransformInputHandler handler(&gm);
+
+        QSignalSpy ended(&handler, &TransformInputHandler::TransformEnded);
+
+        doc.SetSelected(panel);
+        qApp->processEvents();
+
+        EditorContext ctx; ctx.document = &doc; ctx.view = &view;
+
+        // Press on bare BODY: lower-left quadrant, clear of the gizmo's centre
+        // quad and of both axis strips (which radiate from the centre).
+        const QRectF sb = item->sceneBoundingRect();
+        const QPointF bodyScene = sb.center() + QPointF(-sb.width() * 0.35, sb.height() * 0.35);
+
+        MousePressEvent press;
+        press.button = Qt::LeftButton;
+        press.scenePos = bodyScene;
+        press.viewPos = view.mapFromScene(bodyScene);
+
+        const QPointF before = xf->GetPosition();
+        InputResult pr = handler.HandlePress(press, ctx);
+        check(pr.consumed, "press on a selected element body is consumed by the handler");
+        check(handler.GetActiveHandleId() == "translate_free", "it arms the synthetic translate_free handle");
+        check(handler.GetUndoActionName() == "Move", "which GetUndoActionName reports as \"Move\"");
+
+        MouseMoveEvent mv;
+        mv.scenePos = bodyScene + QPointF(120.0, -60.0);
+        mv.viewPos = view.mapFromScene(mv.scenePos);
+        handler.HandleMove(mv, ctx);
+        qApp->processEvents();
+
+        const QPointF moved = xf->GetPosition() - before;
+        check(qAbs(moved.x() - 120.0) < 0.5 && qAbs(moved.y() + 60.0) < 0.5,
+              "dragging the body moves it on both axes");
+        if (!(qAbs(moved.x() - 120.0) < 0.5))
+            std::fprintf(stderr, "      moved by (%.2f, %.2f)\n", moved.x(), moved.y());
+
+        MouseReleaseEvent rel;
+        rel.button = Qt::LeftButton;
+        rel.scenePos = mv.scenePos;
+        rel.viewPos = mv.viewPos;
+        handler.HandleRelease(rel, ctx);
+
+        check(ended.count() == 1, "release emits TransformEnded, so the move is undoable");
+
+        // With the Rotate tool active a body press must NOT move anything.
+        gm.SetActiveGizmoId("rotate");
+        const QPointF beforeRotTool = xf->GetPosition();
+
+        MousePressEvent p2;
+        p2.button = Qt::LeftButton;
+        p2.scenePos = item->sceneBoundingRect().center()
+                    + QPointF(-sb.width() * 0.35, sb.height() * 0.35);
+        p2.viewPos = view.mapFromScene(p2.scenePos);
+
+        InputResult pr2 = handler.HandlePress(p2, ctx);
+        check(!pr2.consumed, "with the Rotate tool, a body press is not taken as a move");
+
+        MouseMoveEvent mv2;
+        mv2.scenePos = p2.scenePos + QPointF(80.0, 80.0);
+        mv2.viewPos = view.mapFromScene(mv2.scenePos);
+        handler.HandleMove(mv2, ctx);
+        qApp->processEvents();
+
+        check(xf->GetPosition() == beforeRotTool, "so the Rotate tool no longer translates elements");
+    }
+
+    std::fprintf(stderr, "renames are undoable (stage 5)\n");
+    {
+        SceneDocument doc;
+        UiElement* panel = doc.CreatePanelElement("Panel", nullptr);
+        const QUuid id = panel->GetId();
+
+        PropertyEditorPanel inspector;
+        inspector.SetTarget(panel);
+
+        QList<PropertyEditRecord> captured;
+        QObject::connect(&inspector, &PropertyEditorPanel::PropertyChangeApplied,
+                         [&captured](const QList<PropertyEditRecord>& r){ captured = r; });
+
+        // Exactly what both rename entry points now call.
+        inspector.ApplyPropertyChange(panel, "name", QStringLiteral("Renamed"));
+
+        check(panel->GetName() == "Renamed", "the rename is applied");
+        check(captured.size() == 1, "it emits one PropertyEditRecord");
+
+        if (captured.size() == 1)
+        {
+            const PropertyEditRecord& r = captured.first();
+            check(r.componentKind.isEmpty(),
+                  "with an EMPTY componentKind - the element-level case PropertyEditCommand handles");
+            check(r.elementId == id, "keyed to the element's id, so undo re-resolves it after a rebuild");
+            check(r.before.toString() == "Panel" && r.after.toString() == "Renamed",
+                  "carrying both the before and after name");
+
+            // Replaying the record backwards is literally what undo does.
+            doc.FindById(r.elementId)->setProperty(r.propName.constData(), r.before);
+            check(panel->GetName() == "Panel", "replaying 'before' through setProperty restores the old name");
+        }
+
+        // And the tree asks rather than mutating.
+        EntityTreeModel model(doc.GetRoot());
+        QSignalSpy asked(&model, &EntityTreeModel::RenameRequested);
+        const QModelIndex idx = model.GetIndexFromElement(panel);
+        check(idx.isValid(), "the panel has a tree row");
+        model.setData(idx, QStringLiteral("FromTree"), Qt::EditRole);
+        check(asked.count() == 1, "setData emits RenameRequested instead of renaming directly");
+        check(panel->GetName() == "Panel", "so the model itself no longer mutates the document");
     }
 
     std::fprintf(stderr, "%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASS",
