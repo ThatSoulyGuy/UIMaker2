@@ -13,6 +13,8 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QSettings>
+
+#include "core/RecentDirs.hpp"
 #include <QSet>
 #include <QMenu>
 #include <QMenuBar>
@@ -1468,16 +1470,19 @@ void MainWindow::ConnectActions()
 
     connect(ui->ActionBake, &QAction::triggered, this, [this]()
     {
-        QSettings settings;
+        // A bake target is not where the scenes live - it is somewhere inside
+        // the consuming game - so it gets its own memory. Sharing io/lastDir
+        // meant one bake moved "Load Scene JSON" into the game's asset tree.
         QString path = QFileDialog::getSaveFileName(this, "Bake Scene",
-            settings.value(QStringLiteral("io/lastDir")).toString(), "UI Binary (*.uibin)");
+            RecentDirs::For(RecentDirs::kBake), "UI Binary (*.uibin)");
 
         if (path.isEmpty())
             return;
 
+        RecentDirs::RememberFile(RecentDirs::kBake, path);
+
         if (SceneExporter::BakeToUiBin(document, path))
         {
-            settings.setValue(QStringLiteral("io/lastDir"), QFileInfo(path).absolutePath());
             QMessageBox::information(this, "Bake", "Scene baked to .uibin successfully.");
         }
         else

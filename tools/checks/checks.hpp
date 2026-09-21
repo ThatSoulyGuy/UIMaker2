@@ -22,6 +22,7 @@ void CheckPropertyGroups();
 void CheckTreeModelReset();
 void CheckLayouts();
 void CheckBlockBounds();
+void CheckRecentDirs();
 void CheckLayoutStretch();
 
 #endif

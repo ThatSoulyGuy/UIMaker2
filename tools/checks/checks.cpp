@@ -269,6 +269,7 @@ int main(int argc, char** argv)
     CheckLayouts();
     CheckLayoutStretch();
     CheckBlockBounds();
+    CheckRecentDirs();
     CheckRegressions();
 
     std::fprintf(stderr, "\n%s (%d failure%s)\n",

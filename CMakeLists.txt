@@ -45,6 +45,8 @@ set(UIMAKER_SOURCES
     src/core/PixelDraw.cpp
     src/core/SpriteSidecar.hpp
     src/core/SpriteSidecar.cpp
+    src/core/RecentDirs.hpp
+    src/core/RecentDirs.cpp
     src/core/TextOffset.hpp
     src/core/TextOffset.cpp
 
@@ -182,6 +184,7 @@ qt_add_executable(UIMaker2Checks
     tools/checks/pixelspans.cpp
     tools/checks/textoffset.cpp
     tools/checks/layouts.cpp
+    tools/checks/recentdirs.cpp
     ${UIMAKER_SOURCES}
 )
 

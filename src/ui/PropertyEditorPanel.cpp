@@ -1,5 +1,6 @@
 #include "ui/PropertyEditorPanel.hpp"
 #include "core/AssetContext.hpp"
+#include "core/RecentDirs.hpp"
 #include "core/UiElement.hpp"
 #include "core/Component.hpp"
 #include "core/Anchor.hpp"
@@ -703,32 +704,42 @@ QWidget* PropertyEditorPanel::EditorForProperty(QObject* object, const QMetaProp
         {
             QString filter;
             QString title;
+            const char* kind = nullptr;
 
             if (name.contains("font", Qt::CaseInsensitive))
             {
                 filter = "Fonts (*.ttf *.otf)";
                 title = "Choose Font";
+                kind = RecentDirs::kFont;
             }
             else
             {
                 filter = "Images (*.png *.jpg *.jpeg *.bmp *.svg)";
                 title = "Choose Image";
+                kind = RecentDirs::kImage;
             }
 
-            const QString src = QFileDialog::getOpenFileName(nullptr, title, QString(), filter);
+            const QString src = QFileDialog::getOpenFileName(nullptr, title, RecentDirs::For(kind), filter);
 
             if (src.isEmpty() || !obj)
                 return;
+
+            // Remember it even if the import below fails - the folder is where
+            // the user went, and that is true either way.
+            RecentDirs::RememberFile(kind, src);
 
             // Relative paths need a project root (the folder that will hold
             // scene.json + assets/). Establish one on first use.
             if (!AssetContext::HasBaseDir())
             {
                 const QString root = QFileDialog::getExistingDirectory(
-                    nullptr, "Choose Project Root (folder for scene.json + assets)");
+                    nullptr, "Choose Project Root (folder for scene.json + assets)",
+                    RecentDirs::For(RecentDirs::kProjectRoot));
 
                 if (root.isEmpty())
                     return;
+
+                RecentDirs::RememberDir(RecentDirs::kProjectRoot, root);
 
                 AssetContext::SetBaseDir(root);
                 emit ProjectRootChanged(root);
