@@ -23,6 +23,7 @@
 #include "components/GridLayoutComponent.hpp"
 #include "components/ScrollBoxComponent.hpp"
 #include "components/StackLayoutComponent.hpp"
+#include "components/TextComponent.hpp"
 #include "components/TransformComponent.hpp"
 #include "scene/SceneDocument.hpp"
 #include "scene/SceneElementItem.hpp"
@@ -317,5 +318,155 @@ void CheckLayoutStretch()
 
         ExpectSize(doc, child, canvas.width(), canvas.height(),
                    "with no non-layout ancestor at all, stretch fills the design canvas");
+    }
+}
+
+void CheckBlockBounds()
+{
+    std::fprintf(stderr, "composite element bounds\n");
+
+    GridSnap::SetEnabled(false);
+    PixelModel::SetMode(PixelModel::Mode::Continuous);
+
+    // The reported structure: a Text with an Image and a Stack>Button under
+    // it. Selecting the Text framed only the glyph run.
+    {
+        SceneDocument doc;
+
+        UiElement* text = doc.CreateTextElement("Text", nullptr);
+        text->GetComponent<TransformComponent>()->SetPosition(QPointF(100.0, 100.0));
+        text->GetComponent<TransformComponent>()->SetScale(QPointF(100.0, 100.0));
+
+        UiElement* image = doc.CreateImageElement("Image", text);
+        image->GetComponent<TransformComponent>()->SetScale(QPointF(120.0, 80.0));
+        image->GetComponent<TransformComponent>()->SetPosition(QPointF(0.0, 40.0));
+
+        UiElement* stack = doc.CreateStackLayoutElement("Stack", text);
+        stack->GetComponent<StackLayoutComponent>()->SetPadding(4.0);
+        stack->GetComponent<TransformComponent>()->SetPosition(QPointF(0.0, 140.0));
+
+        UiElement* button = doc.CreateButtonElement("Button", stack);
+        button->GetComponent<TransformComponent>()->SetScale(QPointF(90.0, 30.0));
+
+        Settle();
+        Settle();
+        Settle();
+
+        SceneElementItem* item = doc.GetItem(text);
+
+        check(item != nullptr, "the composite has a scene item");
+
+        if (item)
+        {
+            const QRectF own = item->boundingRect();
+            const QRectF block = item->BlockRect();
+
+            // The element alone is still the element alone - painting and the
+            // scale handles depend on that staying true.
+            check(Near(own.width(), 100.0) && Near(own.height(), 100.0),
+                  "the element's own rect is unchanged");
+
+            // 120 wide from the image, 178 tall down to the button's bottom.
+            const bool wraps = block.width() > own.width() && block.height() > own.height();
+
+            check(wraps, "its block rect covers the children too");
+
+            check(Near(block.width(), 120.0) && Near(block.height(), 178.0),
+                  "and is exactly the union of the element and every descendant");
+
+            if (!Near(block.width(), 120.0) || !Near(block.height(), 178.0))
+                std::fprintf(stderr, "      block = %.1f x %.1f, expected 120.0 x 178.0\n",
+                             block.width(), block.height());
+
+            // What the gizmo frames, in scene space.
+            const QRectF scene = item->BlockSceneRect();
+
+            check(Near(scene.x(), 100.0) && Near(scene.y(), 100.0)
+               && Near(scene.width(), 120.0) && Near(scene.height(), 178.0),
+                  "the scene-space block is the frame the selection gizmo draws");
+        }
+    }
+
+    // A clipping container must NOT be extended by what it clips.
+    {
+        SceneDocument doc;
+
+        UiElement* box = doc.CreateScrollBoxElement("Box", nullptr);
+        box->GetComponent<TransformComponent>()->SetScale(QPointF(100.0, 60.0));
+        box->GetComponent<ScrollBoxComponent>()->SetPadding(0.0);
+        box->GetComponent<ScrollBoxComponent>()->SetSpacing(0.0);
+
+        Panel(doc, "Tall", box, 80.0, 400.0);
+
+        Settle();
+        Settle();
+
+        SceneElementItem* item = doc.GetItem(box);
+
+        check(Near(item->BlockRect().height(), item->boundingRect().height()),
+              "a ScrollBox's block stops at its own bounds, because it clips its children");
+    }
+
+    // The layout consequence: a sibling has to clear the whole block.
+    {
+        SceneDocument doc;
+
+        UiElement* outer = doc.CreateStackLayoutElement("Outer", nullptr);
+        outer->GetComponent<StackLayoutComponent>()->SetPadding(0.0);
+        outer->GetComponent<StackLayoutComponent>()->SetSpacing(0.0);
+
+        UiElement* composite = Panel(doc, "Composite", outer, 100.0, 100.0);
+
+        UiElement* overhang = Panel(doc, "Overhang", composite, 120.0, 80.0);
+        overhang->GetComponent<TransformComponent>()->SetPosition(QPointF(0.0, 40.0));
+
+        UiElement* after = Panel(doc, "After", outer, 30.0, 20.0);
+
+        Settle();
+        Settle();
+        Settle();
+
+        // Composite's block is 120 x 120 (the overhang reaches y = 120).
+        ExpectSize(doc, outer, 120.0, 140.0, "a layout reserves each child's whole block");
+
+        const double afterY = doc.GetItem(after)->pos().y();
+
+        check(Near(afterY, 120.0), "so the next sibling clears it instead of overlapping it");
+
+        if (!Near(afterY, 120.0))
+            std::fprintf(stderr, "      sibling at y=%.1f, expected 120.0 (block bottom)\n", afterY);
+    }
+
+    // A child whose block extends ABOVE its origin still lands where the
+    // layout put it, because placement uses the block's top-left.
+    {
+        SceneDocument doc;
+
+        UiElement* outer = doc.CreateStackLayoutElement("Outer", nullptr);
+        outer->GetComponent<StackLayoutComponent>()->SetPadding(0.0);
+        outer->GetComponent<StackLayoutComponent>()->SetSpacing(0.0);
+
+        UiElement* first = Panel(doc, "First", outer, 40.0, 30.0);
+
+        UiElement* second = Panel(doc, "Second", outer, 40.0, 30.0);
+
+        UiElement* above = Panel(doc, "Above", second, 40.0, 25.0);
+        above->GetComponent<TransformComponent>()->SetPosition(QPointF(0.0, -25.0));
+
+        Settle();
+        Settle();
+        Settle();
+
+        SceneElementItem* secondItem = doc.GetItem(second);
+
+        const QRectF blockInParent = secondItem->BlockRect().translated(secondItem->pos());
+
+        check(Near(blockInParent.top(), 30.0),
+              "a child whose block overhangs upward is placed by its block's top edge");
+
+        if (!Near(blockInParent.top(), 30.0))
+            std::fprintf(stderr, "      block top at %.1f, expected 30.0\n", blockInParent.top());
+
+        ExpectSize(doc, outer, 40.0, 85.0, "and the layout reserves the overhang above it too");
     }
 }

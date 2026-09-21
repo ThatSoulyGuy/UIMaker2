@@ -29,10 +29,15 @@ InputResult TransformInputHandler::HandlePress(const MousePressEvent& event, Edi
 
     QList<SceneElementItem*> selectedItems = GetTopLevelSelectedItems(ctx);
 
+    // The gizmo frames the BLOCK - the element together with everything under
+    // it - so what you see selected is what you actually have. Only the frame:
+    // the per-item start state below deliberately keeps the element's OWN rect,
+    // because that is what a scale handle edits and what the rotation origin
+    // is.
     auto boundsOf = [this](const QList<SceneElementItem*>& items)
     {
         return items.size() > 1 ? ComputeUnionSceneBounds(items)
-                                : items.first()->sceneBoundingRect();
+                                : items.first()->BlockSceneRect();
     };
 
     // A gizmo handle only exists when something is already selected.
@@ -307,7 +312,7 @@ InputResult TransformInputHandler::HandleMove(const MouseMoveEvent& event, Edito
             {
                 const QRectF sceneBounds = selectedItems.size() > 1
                     ? ComputeUnionSceneBounds(selectedItems)
-                    : selectedItems.first()->sceneBoundingRect();
+                    : selectedItems.first()->BlockSceneRect();
 
                 GizmoHitResult hit = m_gizmoManager->HitTest(event.viewPos, sceneBounds, ctx.view);
 
@@ -776,9 +781,9 @@ QRectF TransformInputHandler::ComputeUnionSceneBounds(const QList<SceneElementIt
         if (!item)
             continue;
         if (result.isNull())
-            result = item->sceneBoundingRect();
+            result = item->BlockSceneRect();
         else
-            result = result.united(item->sceneBoundingRect());
+            result = result.united(item->BlockSceneRect());
     }
     return result;
 }

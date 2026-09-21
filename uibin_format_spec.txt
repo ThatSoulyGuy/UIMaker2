@@ -1120,11 +1120,17 @@
 
       offset = padding
       for each child in order:
-          if direction == 0 (Vertical):   child at (padding, offset)
-          else:                           child at (offset, padding)
-          offset += child extent along the run axis + spacing
+          block = the child's BLOCK rect (R15.3), in the child's own frame
+          if direction == 0 (Vertical):   block top-left at (padding, offset)
+          else:                           block top-left at (offset, padding)
+          offset += block extent along the run axis + spacing
       remove the trailing spacing, add padding
       own size = (maxCrossExtent + 2*padding) across, offset along the run
+
+  Note that it is the BLOCK's top-left that is placed, not the child's origin.
+  The two differ whenever a descendant sits above or to the left of its
+  parent's origin, and placing the origin there would push the overhang into
+  the preceding sibling.
 
   There is no cross-axis alignment and no fill: every child sits at `padding`
   on the cross axis.
@@ -1147,6 +1153,26 @@
 
   R15.2  Layout components measure each child's UNROTATED extent. A rotated
          child is measured by its axis-aligned local rect.
+  R15.3  The extent a layout reserves for a child is that child's BLOCK: the
+         union, in the child's own coordinate frame, of
+
+             - the child's resolved rect (11.3), and
+             - the rects of every descendant beneath it, each mapped through
+               its own position and rotation, recursively.
+
+         A child's own rect is NOT sufficient. An element is frequently a
+         composite - a label with an icon and a button under it - and measuring
+         only the element itself packs the next sibling straight through its
+         descendants. The descendants' rotations count here even though the
+         child's own does not (R15.2): the child's rotation is applied by the
+         layout's own frame, theirs is already inside the block.
+
+         EXCEPTION: a container that clips its children to its bounds - a
+         ScrollBox (15.2) - has a block equal to its own rect. Nothing that is
+         clipped away can extend it.
+
+         The same block is what an editor should frame when the element is
+         selected; it is the element as a user perceives it.
 
 
 --------------------------------------------------------------------------------
@@ -1204,6 +1230,8 @@
   [ ] resolve stretch per axis against the first ancestor that
       does not size itself from its children                        R11.7
   [ ] re-run layouts and ignore stored child positions              R15.1
+  [ ] reserve each layout child's whole subtree, not just the
+      child's own rect                                              R15.3
   [ ] use the FINAL size for anchoring and rotation                 R11.5
 
   R17.1  CONSUMER MUST bound reads to the SECTION being parsed, not merely to

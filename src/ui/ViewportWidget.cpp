@@ -100,7 +100,12 @@ void ViewportWidget::FitToItem(QGraphicsItem* item)
     if (!item)
         return;
 
-    const QRectF r = item->sceneBoundingRect().adjusted(-20.0, -20.0, 20.0, 20.0);
+    // Frame the whole block, so pressing F on a composite shows all of it
+    // rather than just the element you happened to select.
+    const auto* sei = dynamic_cast<const SceneElementItem*>(item);
+
+    const QRectF bounds = sei ? sei->BlockSceneRect() : item->sceneBoundingRect();
+    const QRectF r = bounds.adjusted(-20.0, -20.0, 20.0, 20.0);
     fitInView(r, Qt::KeepAspectRatio);
 }
 

@@ -268,6 +268,7 @@ int main(int argc, char** argv)
     CheckTreeModelReset();
     CheckLayouts();
     CheckLayoutStretch();
+    CheckBlockBounds();
     CheckRegressions();
 
     std::fprintf(stderr, "\n%s (%d failure%s)\n",

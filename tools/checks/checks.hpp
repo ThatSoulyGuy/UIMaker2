@@ -21,6 +21,7 @@ void CheckTextOffset();
 void CheckPropertyGroups();
 void CheckTreeModelReset();
 void CheckLayouts();
+void CheckBlockBounds();
 void CheckLayoutStretch();
 
 #endif

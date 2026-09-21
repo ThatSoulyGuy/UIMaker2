@@ -59,17 +59,23 @@ void ScrollBoxComponent::Update(SceneElementItem& item, QRectF& rect, const QRec
         for (auto* comp : childElement->GetComponents())
             m_childConnections.append(QObject::connect(comp, &Component::ComponentChanged, this, &ScrollBoxComponent::OnChildChanged));
 
-        QRectF childRect = childItem->boundingRect();
+        // The BLOCK, not the element alone: a child that has children of its
+        // own occupies their space too, and reserving only its own rect packs
+        // the next sibling straight through them.
+        const QRectF childRect = childItem->BlockRect();
 
+        // setPos places the child's ORIGIN, but what has to land at the
+        // running offset is the top-left of its block - which sits above and
+        // left of the origin whenever a descendant does.
         if (m_direction == Vertical)
         {
-            childItem->setPosFromComponent(PixelModel::SnapPoint(QPointF(m_padding, offset)));
+            childItem->setPosFromComponent(PixelModel::SnapPoint(QPointF(m_padding, offset) - childRect.topLeft()));
             offset += childRect.height() + m_spacing;
             maxCross = std::max(maxCross, childRect.width());
         }
         else
         {
-            childItem->setPosFromComponent(PixelModel::SnapPoint(QPointF(offset, m_padding)));
+            childItem->setPosFromComponent(PixelModel::SnapPoint(QPointF(offset, m_padding) - childRect.topLeft()));
             offset += childRect.width() + m_spacing;
             maxCross = std::max(maxCross, childRect.height());
         }

@@ -263,6 +263,22 @@ void SceneElementItem::RefreshFromComponents()
     }
 }
 
+QRectF SceneElementItem::BlockRect() const
+{
+    if (flags() & QGraphicsItem::ItemClipsChildrenToShape)
+        return boundingRect();
+
+    // childrenBoundingRect() is recursive and already maps each descendant
+    // through its own transform, so a rotated or offset child counts by the
+    // space it really occupies.
+    return boundingRect() | childrenBoundingRect();
+}
+
+QRectF SceneElementItem::BlockSceneRect() const
+{
+    return mapToScene(BlockRect()).boundingRect();
+}
+
 QSizeF SceneElementItem::StretchReferenceSize() const
 {
     bool haveWidth = false;

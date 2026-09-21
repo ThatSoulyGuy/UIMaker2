@@ -34,6 +34,22 @@ public:
 
     UiElement* GetElement() const noexcept;
 
+    // This element together with everything under it.
+    //
+    // boundingRect() is the element ALONE. That is the right answer for
+    // painting and for what a scale handle edits, but it is the wrong answer
+    // for any question about the block as a whole: what selecting it should
+    // frame, and how much room a layout has to reserve for it. A Text with an
+    // image and a button beneath it measured 100x100 - its glyph run - while
+    // occupying 120x178, so a layout packed the next sibling straight through
+    // the image.
+    //
+    // A container that clips its children (ScrollBox) is excluded: nothing a
+    // child does there can extend the block, because none of it is visible
+    // outside the container.
+    QRectF BlockRect() const;
+    QRectF BlockSceneRect() const;
+
     // The size a STRETCH resolves against, per axis.
     //
     // Normally this is simply the parent's size. It differs only under a

@@ -68,7 +68,8 @@ void GridLayoutComponent::Update(SceneElementItem& item, QRectF& rect, const QRe
         int col = static_cast<int>(i) % cols;
         int row = static_cast<int>(i) / cols;
 
-        QRectF childRect = children[i]->boundingRect();
+        // The BLOCK, not the element alone - see StackLayout.
+        const QRectF childRect = children[i]->BlockRect();
         colWidths[col] = std::max(colWidths[col], childRect.width());
         rowHeights[row] = std::max(rowHeights[row], childRect.height());
     }
@@ -87,7 +88,9 @@ void GridLayoutComponent::Update(SceneElementItem& item, QRectF& rect, const QRe
         for (int r = 0; r < row; ++r)
             y += rowHeights[r] + m_spacingV;
 
-        children[i]->setPosFromComponent(PixelModel::SnapPoint(QPointF(x, y)));
+        // Place the block's top-left in the cell, not the item's origin.
+        children[i]->setPosFromComponent(
+            PixelModel::SnapPoint(QPointF(x, y) - children[i]->BlockRect().topLeft()));
     }
 
     // Compute total size
